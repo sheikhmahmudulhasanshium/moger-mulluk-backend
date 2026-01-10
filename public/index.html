@@ -1,0 +1,49 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Moger Mulluk API | Kingdom of Taste</title>
+    <link rel="icon" href="/favicon.ico" type="image/x-icon">
+    <style>
+        :root {
+            --primary-color: #4b2c20; /* Coffee Brown */
+            --secondary-color: #d4a373; /* Tea/Cream */
+            --accent-color: #bc6c25; 
+            --text-light: #fefae0;
+            --card-bg: rgba(255, 255, 255, 0.05);
+        }
+        body {
+            font-family: 'Inter', system-ui, sans-serif;
+            margin: 0; background: #1a1a1a; color: var(--text-light);
+            display: flex; align-items: center; justify-content: center; min-height: 100vh;
+        }
+        .container {
+            text-align: center; padding: 3rem; background: var(--card-bg);
+            backdrop-filter: blur(10px); border-radius: 20px; border: 1px solid rgba(255,255,255,0.1);
+            max-width: 500px; width: 90%;
+        }
+        .logo img { width: 120px; margin-bottom: 1.5rem; }
+        h1 { font-size: 2rem; margin-bottom: 0.5rem; color: var(--secondary-color); }
+        p { opacity: 0.8; line-height: 1.6; margin-bottom: 2rem; }
+        .btn {
+            display: inline-block; padding: 12px 24px; border-radius: 10px;
+            text-decoration: none; font-weight: bold; transition: 0.3s;
+        }
+        .btn-docs { background: var(--secondary-color); color: #1a1a1a; margin-right: 10px; }
+        .btn-web { border: 1px solid var(--secondary-color); color: var(--secondary-color); }
+        .btn:hover { transform: translateY(-2px); opacity: 0.9; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="logo"><img src="/logo.svg" alt="Moger Mulluk"></div>
+        <h1>Moger Mulluk Backend</h1>
+        <p>The digital engine of the Kingdom of Absolute Freedom. Powering taste, connection, and the battle between Tea and Coffee.</p>
+        <div class="actions">
+            <a href="/api" class="btn btn-docs">View API Docs</a>
+            <a href="https://moger-mulluk.vercel.app" class="btn btn-web">Visit Website</a>
+        </div>
+    </div>
+</body>
+</html>

@@ -1,0 +1,28 @@
+src/
+├── database/
+│   └── database.module.ts      # Connection management
+├── modules/
+│   ├── products/               # Menu items (Tea, Coffee)
+│   │   ├── products.schema.ts
+│   │   ├── products.service.ts
+│   │   └── products.controller.ts
+│   └── content/                # FAQ, About, UI Strings
+│       ├── content.schema.ts
+│       ├── content.service.ts
+│       └── content.controller.ts
+└── main.ts                     # Vercel entry point
+
+
+
+moger-mulluk
+|_cluster-0
+  |_metadata
+    |_languages
+    |_about
+    |_faqs
+  |_products
+    |_[tea]
+    |_[coffee]
+    |_[other_beverages]
+    |_[snacks]
+    
