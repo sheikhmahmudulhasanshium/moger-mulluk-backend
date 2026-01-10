@@ -5,7 +5,8 @@
     "removeComments": true,
     "emitDecoratorMetadata": true,
     "experimentalDecorators": true,
-    "allowSyntheticDefaultImports": true,
+    "allowSyntheticDefaultImports": true,    
+    "esModuleInterop": true,
     "target": "ES2023",
     "sourceMap": true,
     "outDir": "./dist",
@@ -14,8 +15,16 @@
     "skipLibCheck": true,
     "strictNullChecks": true,
     "forceConsistentCasingInFileNames": true,
+    
+    /* ADD THESE FOR BETTER NESTJS/SWAGGER SUPPORT */
+    "strictPropertyInitialization": false, // Prevents errors in DTOs/Schemas where values are set by decorators
+    "paths": {
+      "@/*": ["src/*"] // Allows you to use clean imports like '@/modules/languages/...'
+    },
+
     "noImplicitAny": false,
     "strictBindCallApply": false,
     "noFallthroughCasesInSwitch": false
-  }
+  },
+  "exclude": ["node_modules", "dist", "public"] // Don't compile your static folder
 }
