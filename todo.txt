@@ -19,7 +19,7 @@ moger-mulluk
   |_metadata
     |_languages
     |_about
-    |_faqs
+    |_faq
   |_products
     |_[tea]
     |_[coffee]

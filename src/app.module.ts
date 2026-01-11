@@ -8,6 +8,7 @@ import { APP_GUARD } from '@nestjs/core';
 import { AppController } from './app.controller';
 import { AppService } from './app.service';
 import { LanguagesModule } from './languages/languages.module'; // Import this
+import { FaqModule } from './faq/faq.module';
 @Module({
   imports: [
     ConfigModule.forRoot({ isGlobal: true }),
@@ -22,7 +23,10 @@ import { LanguagesModule } from './languages/languages.module'; // Import this
       connectionName: 'metadata',
       useFactory: (config: ConfigService) => {
         const uri = config.get<string>('MONGODB_URI')?.replace(/\/$/, '') ?? '';
-        return { uri: `${uri}/metadata?retryWrites=true&w=majority` };
+        return {
+          uri: `${uri}/metadata?retryWrites=true&w=majority`,
+          serverSelectionTimeoutMS: 5000, // Fail after 5 seconds if DB not found
+        };
       },
       inject: [ConfigService],
     }),
@@ -37,6 +41,8 @@ import { LanguagesModule } from './languages/languages.module'; // Import this
     }),
 
     LanguagesModule,
+    FaqModule,
+
     ThrottlerModule.forRoot([{ ttl: 60000, limit: 20 }]),
   ],
   controllers: [AppController],

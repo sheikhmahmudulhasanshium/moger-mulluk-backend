@@ -1,5 +1,5 @@
 import { NestFactory, HttpAdapterHost } from '@nestjs/core';
-import { ValidationPipe } from '@nestjs/common';
+import { ValidationPipe, Logger, INestApplication } from '@nestjs/common';
 import { AppModule } from './app.module';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import { AllExceptionsFilter } from './all-exceptions.filter';
@@ -14,87 +14,62 @@ type ExpressInstance = (
   next?: NextFunction,
 ) => void;
 
-interface RequestWithBody extends Request {
-  body: Record<string, unknown>;
-}
-
 let cachedApp: ExpressInstance;
 
-async function bootstrap(): Promise<ExpressInstance> {
+async function bootstrap(): Promise<INestApplication> {
+  const app = await NestFactory.create(AppModule);
+  const httpAdapterHost = app.get(HttpAdapterHost);
+
+  app.useGlobalFilters(new AllExceptionsFilter(httpAdapterHost));
+  app.setGlobalPrefix('api', { exclude: ['/'] });
+  app.use(helmet({ contentSecurityPolicy: false }));
+
+  // FIX: Refined cast to avoid unsafe assignment
+  const sanitizeFn = sanitize as <T>(data: T) => T;
+
+  app.use((req: Request, _res: Response, next: NextFunction) => {
+    if (req.body) {
+      req.body = sanitizeFn(req.body) as Record<string, unknown>;
+    }
+    next();
+  });
+
+  app.use(compression());
+  app.enableCors();
+  app.useGlobalPipes(new ValidationPipe({ whitelist: true, transform: true }));
+
+  const config = new DocumentBuilder()
+    .setTitle('Moger Mulluk Api')
+    .setVersion('1.0')
+    .build();
+  const document = SwaggerModule.createDocument(app, config);
+  SwaggerModule.setup('api', app, document);
+
+  return app;
+}
+
+export default async (req: Request, res: Response): Promise<void> => {
   if (!cachedApp) {
-    const app = await NestFactory.create(AppModule);
-
-    const httpAdapterHost = app.get(HttpAdapterHost);
-    app.useGlobalFilters(new AllExceptionsFilter(httpAdapterHost));
-
-    app.setGlobalPrefix('api', { exclude: ['/'] });
-
-    // 1. FIXED HELMET: Added 'connect-src' and expanded 'script-src' for CDN
-    app.use(
-      helmet({
-        contentSecurityPolicy: {
-          directives: {
-            defaultSrc: [`'self'`],
-            styleSrc: [`'self'`, `'unsafe-inline'`, 'cdn.jsdelivr.net'],
-            scriptSrc: [`'self'`, `'unsafe-inline'`, 'cdn.jsdelivr.net'],
-            imgSrc: [`'self'`, 'data:', 'validator.swagger.io'],
-            connectSrc: [`'self'`, 'cdn.jsdelivr.net'], // Essential for .map files
-          },
-        },
-      }),
-    );
-
-    const sanitizeFn = sanitize as unknown as <T>(data: T) => T;
-
-    // 2. FIXED BUILD ERROR: Use explicit callback type for next
-    app.use((req: Request, _res: Response, next: () => void) => {
-      const request = req as RequestWithBody;
-      if (request.body) {
-        request.body = sanitizeFn(request.body);
-      }
-      next();
-    });
-
-    app.use(compression());
-    app.enableCors();
-    app.useGlobalPipes(
-      new ValidationPipe({ whitelist: true, transform: true }),
-    );
-
-    const config = new DocumentBuilder()
-      .setTitle('Moger Mulluk Api')
-      .setVersion('1.0')
-      .build();
-
-    const document = SwaggerModule.createDocument(app, config);
-
-    // 3. FIXED SWAGGER: Forced use of CDN and absolute URLs
-    SwaggerModule.setup('api', app, document, {
-      customfavIcon: '/favicon.ico',
-      customSiteTitle: 'Moger Mulluk API Docs',
-      customJs: [
-        'https://cdn.jsdelivr.net/npm/swagger-ui-dist@5.11.0/swagger-ui-bundle.js',
-        'https://cdn.jsdelivr.net/npm/swagger-ui-dist@5.11.0/swagger-ui-standalone-preset.js',
-      ],
-      customCssUrl: [
-        'https://cdn.jsdelivr.net/npm/swagger-ui-dist@5.11.0/swagger-ui.css',
-      ],
-    });
-
+    const app = await bootstrap();
     await app.init();
     cachedApp = app
       .getHttpAdapter()
       .getInstance() as unknown as ExpressInstance;
   }
-  return cachedApp;
-}
-
-export default async (req: Request, res: Response) => {
-  const app = await bootstrap();
-  return app(req, res);
+  return cachedApp(req, res);
 };
 
-// Added back for Local dev support
+// LOCAL DEVELOPMENT SUPPORT
 if (process.env.NODE_ENV !== 'production' && !process.env.VERCEL) {
-  void bootstrap();
+  const logger = new Logger('Bootstrap');
+  // FIX: Added 'void' to satisfy @typescript-eslint/no-floating-promises
+  void bootstrap()
+    .then(async (app) => {
+      const port = process.env.PORT || 3001;
+      await app.listen(port);
+      logger.log(`🚀 Server ready at http://localhost:${port}/api`);
+    })
+    .catch((err: unknown) => {
+      console.error('💥 Error starting server', err);
+    });
 }

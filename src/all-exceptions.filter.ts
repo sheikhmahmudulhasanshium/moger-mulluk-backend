@@ -7,7 +7,7 @@ import {
   Logger,
 } from '@nestjs/common';
 import { HttpAdapterHost } from '@nestjs/core';
-import { Request, Response } from 'express'; // Import both
+import { Request, Response } from 'express';
 
 @Catch()
 export class AllExceptionsFilter implements ExceptionFilter {
@@ -19,8 +19,6 @@ export class AllExceptionsFilter implements ExceptionFilter {
     const { httpAdapter } = this.httpAdapterHost;
     const ctx = host.switchToHttp();
 
-    // FIX 1: Provide the <Request> and <Response> generics here
-    // This stops NestJS from returning 'any'
     const request = ctx.getRequest<Request>();
     const response = ctx.getResponse<Response>();
 
@@ -29,14 +27,20 @@ export class AllExceptionsFilter implements ExceptionFilter {
         ? exception.getStatus()
         : HttpStatus.INTERNAL_SERVER_ERROR;
 
-    // FIX 2: Safely extract message without 'any'
     let message = 'Unknown error';
+
     if (exception instanceof HttpException) {
       const res = exception.getResponse();
-      message =
-        typeof res === 'object' && res !== null
-          ? ((res as Record<string, unknown>).message as string)
-          : exception.message;
+      // FIX: Use Record<string, unknown> instead of any
+      if (typeof res === 'object' && res !== null) {
+        const resObj = res as Record<string, unknown>;
+        message =
+          typeof resObj.message === 'string'
+            ? resObj.message
+            : JSON.stringify(res);
+      } else {
+        message = res;
+      }
     } else if (exception instanceof Error) {
       message = exception.message;
     }
@@ -45,15 +49,12 @@ export class AllExceptionsFilter implements ExceptionFilter {
       `Status: ${httpStatus} | Path: ${httpAdapter.getRequestUrl(request)} | Error: ${message}`,
     );
 
-    // FIX 3: Explicitly type the response body object
+    // FIX: Explicitly type the response body
     const responseBody: Record<string, unknown> = {
       statusCode: httpStatus,
       timestamp: new Date().toISOString(),
       path: httpAdapter.getRequestUrl(request),
-      message:
-        httpStatus === (HttpStatus.INTERNAL_SERVER_ERROR as number)
-          ? 'Moger Mulluk Internal Server Error'
-          : message,
+      message: message,
     };
 
     httpAdapter.reply(response, responseBody, httpStatus);
