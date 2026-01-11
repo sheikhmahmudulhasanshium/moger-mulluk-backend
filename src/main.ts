@@ -8,12 +8,15 @@ import compression from 'compression';
 import * as sanitize from 'mongo-sanitize';
 import { Request, Response, NextFunction } from 'express';
 
+interface SanitizeRequest extends Request {
+  body: Record<string, unknown>;
+}
+
 type ExpressInstance = (
   req: Request,
   res: Response,
   next?: NextFunction,
 ) => void;
-
 let cachedApp: ExpressInstance;
 
 async function bootstrap(): Promise<INestApplication> {
@@ -22,14 +25,24 @@ async function bootstrap(): Promise<INestApplication> {
 
   app.useGlobalFilters(new AllExceptionsFilter(httpAdapterHost));
   app.setGlobalPrefix('api', { exclude: ['/'] });
-  app.use(helmet({ contentSecurityPolicy: false }));
 
-  // FIX: Refined cast to avoid unsafe assignment
+  app.use(
+    helmet({
+      contentSecurityPolicy: false,
+      crossOriginEmbedderPolicy: false,
+    }),
+  );
+
   const sanitizeFn = sanitize as <T>(data: T) => T;
 
   app.use((req: Request, _res: Response, next: NextFunction) => {
-    if (req.body) {
-      req.body = sanitizeFn(req.body) as Record<string, unknown>;
+    const sanitizeReq = req as unknown as SanitizeRequest;
+    if (sanitizeReq.body) {
+      // FIX: Use double casting (as unknown as ...) to break the 'any' chain
+      sanitizeReq.body = sanitizeFn(sanitizeReq.body) as unknown as Record<
+        string,
+        unknown
+      >;
     }
     next();
   });
@@ -43,7 +56,16 @@ async function bootstrap(): Promise<INestApplication> {
     .setVersion('1.0')
     .build();
   const document = SwaggerModule.createDocument(app, config);
-  SwaggerModule.setup('api', app, document);
+
+  SwaggerModule.setup('api', app, document, {
+    customJs: [
+      'https://cdn.jsdelivr.net/npm/swagger-ui-dist@5.11.0/swagger-ui-bundle.js',
+      'https://cdn.jsdelivr.net/npm/swagger-ui-dist@5.11.0/swagger-ui-standalone-preset.js',
+    ],
+    customCssUrl: [
+      'https://cdn.jsdelivr.net/npm/swagger-ui-dist@5.11.0/swagger-ui.css',
+    ],
+  });
 
   return app;
 }
@@ -59,10 +81,8 @@ export default async (req: Request, res: Response): Promise<void> => {
   return cachedApp(req, res);
 };
 
-// LOCAL DEVELOPMENT SUPPORT
 if (process.env.NODE_ENV !== 'production' && !process.env.VERCEL) {
   const logger = new Logger('Bootstrap');
-  // FIX: Added 'void' to satisfy @typescript-eslint/no-floating-promises
   void bootstrap()
     .then(async (app) => {
       const port = process.env.PORT || 3001;

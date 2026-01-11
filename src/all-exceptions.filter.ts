@@ -22,22 +22,40 @@ export class AllExceptionsFilter implements ExceptionFilter {
     const request = ctx.getRequest<Request>();
     const response = ctx.getResponse<Response>();
 
+    // Double cast to string to satisfy ESLint
+    const url = httpAdapter.getRequestUrl(request) as unknown as string;
+
+    // 1. SILENCE BROWSER NOISE & FIX SWAGGER MIME ERRORS
+    const isBrowserNoise =
+      url.includes('.well-known') ||
+      url.includes('favicon.ico') ||
+      url.endsWith('.js') ||
+      url.endsWith('.css') ||
+      url.endsWith('.map');
+
+    if (isBrowserNoise) {
+      httpAdapter.reply(response, 'Not Found', HttpStatus.NOT_FOUND);
+      return;
+    }
+
     const httpStatus =
       exception instanceof HttpException
-        ? exception.getStatus()
-        : HttpStatus.INTERNAL_SERVER_ERROR;
+        ? exception.getStatus() // FIX: Removed 'as number' (unnecessary assertion)
+        : (HttpStatus.INTERNAL_SERVER_ERROR as number);
 
     let message = 'Unknown error';
 
     if (exception instanceof HttpException) {
       const res = exception.getResponse();
-      // FIX: Use Record<string, unknown> instead of any
       if (typeof res === 'object' && res !== null) {
         const resObj = res as Record<string, unknown>;
-        message =
-          typeof resObj.message === 'string'
-            ? resObj.message
-            : JSON.stringify(res);
+        if (Array.isArray(resObj.message)) {
+          message = (resObj.message as unknown[]).join(', ');
+        } else if (typeof resObj.message === 'string') {
+          message = resObj.message;
+        } else {
+          message = JSON.stringify(res);
+        }
       } else {
         message = res;
       }
@@ -45,15 +63,21 @@ export class AllExceptionsFilter implements ExceptionFilter {
       message = exception.message;
     }
 
-    this.logger.error(
-      `Status: ${httpStatus} | Path: ${httpAdapter.getRequestUrl(request)} | Error: ${message}`,
-    );
+    // 2. ONLY LOG ACTUAL API ERRORS
+    // FIX: Prettier formatting applied and parentheses added around enum cast
+    if (
+      httpStatus !== (HttpStatus.NOT_FOUND as number) ||
+      url.startsWith('/api')
+    ) {
+      this.logger.error(
+        `Status: ${httpStatus} | Path: ${url} | Error: ${message}`,
+      );
+    }
 
-    // FIX: Explicitly type the response body
     const responseBody: Record<string, unknown> = {
       statusCode: httpStatus,
       timestamp: new Date().toISOString(),
-      path: httpAdapter.getRequestUrl(request),
+      path: url,
       message: message,
     };
 
