@@ -8,6 +8,7 @@ import compression from 'compression';
 import * as sanitize from 'mongo-sanitize';
 import { Request, Response, NextFunction } from 'express';
 
+// Define interface to handle strict body typing
 interface SanitizeRequest extends Request {
   body: Record<string, unknown>;
 }
@@ -17,15 +18,19 @@ type ExpressInstance = (
   res: Response,
   next?: NextFunction,
 ) => void;
+
 let cachedApp: ExpressInstance;
 
 async function bootstrap(): Promise<INestApplication> {
   const app = await NestFactory.create(AppModule);
   const httpAdapterHost = app.get(HttpAdapterHost);
 
+  // 1. Global Filters & Prefix
   app.useGlobalFilters(new AllExceptionsFilter(httpAdapterHost));
   app.setGlobalPrefix('api', { exclude: ['/'] });
 
+  // 2. Security & Middleware
+  // ContentSecurityPolicy is disabled to allow Swagger CDN assets to load
   app.use(
     helmet({
       contentSecurityPolicy: false,
@@ -34,11 +39,9 @@ async function bootstrap(): Promise<INestApplication> {
   );
 
   const sanitizeFn = sanitize as <T>(data: T) => T;
-
   app.use((req: Request, _res: Response, next: NextFunction) => {
     const sanitizeReq = req as unknown as SanitizeRequest;
     if (sanitizeReq.body) {
-      // FIX: Use double casting (as unknown as ...) to break the 'any' chain
       sanitizeReq.body = sanitizeFn(sanitizeReq.body) as unknown as Record<
         string,
         unknown
@@ -51,25 +54,30 @@ async function bootstrap(): Promise<INestApplication> {
   app.enableCors();
   app.useGlobalPipes(new ValidationPipe({ whitelist: true, transform: true }));
 
+  // 3. Swagger Configuration
   const config = new DocumentBuilder()
     .setTitle('Moger Mulluk Api')
     .setVersion('1.0')
     .build();
   const document = SwaggerModule.createDocument(app, config);
 
+  // Use reliable CDN for Swagger UI to avoid Vercel 404/MIME errors
   SwaggerModule.setup('api', app, document, {
+    customSiteTitle: 'Moger Mulluk API Docs',
+    customfavIcon: 'https://swagger.io/favicon.ico',
     customJs: [
-      'https://cdn.jsdelivr.net/npm/swagger-ui-dist@5.11.0/swagger-ui-bundle.js',
-      'https://cdn.jsdelivr.net/npm/swagger-ui-dist@5.11.0/swagger-ui-standalone-preset.js',
+      'https://cdnjs.cloudflare.com/ajax/libs/swagger-ui/4.15.5/swagger-ui-bundle.js',
+      'https://cdnjs.cloudflare.com/ajax/libs/swagger-ui/4.15.5/swagger-ui-standalone-preset.js',
     ],
     customCssUrl: [
-      'https://cdn.jsdelivr.net/npm/swagger-ui-dist@5.11.0/swagger-ui.css',
+      'https://cdnjs.cloudflare.com/ajax/libs/swagger-ui/4.15.5/swagger-ui.min.css',
     ],
   });
 
   return app;
 }
 
+// PRODUCTION / VERCEL EXPORT
 export default async (req: Request, res: Response): Promise<void> => {
   if (!cachedApp) {
     const app = await bootstrap();
@@ -81,6 +89,7 @@ export default async (req: Request, res: Response): Promise<void> => {
   return cachedApp(req, res);
 };
 
+// LOCAL DEVELOPMENT
 if (process.env.NODE_ENV !== 'production' && !process.env.VERCEL) {
   const logger = new Logger('Bootstrap');
   void bootstrap()

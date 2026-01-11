@@ -21,26 +21,31 @@ export class AllExceptionsFilter implements ExceptionFilter {
 
     const request = ctx.getRequest<Request>();
     const response = ctx.getResponse<Response>();
-
-    // Double cast to string to satisfy ESLint
     const url = httpAdapter.getRequestUrl(request) as unknown as string;
 
-    // 1. SILENCE BROWSER NOISE & FIX SWAGGER MIME ERRORS
-    const isBrowserNoise =
-      url.includes('.well-known') ||
-      url.includes('favicon.ico') ||
-      url.endsWith('.js') ||
-      url.endsWith('.css') ||
-      url.endsWith('.map');
-
-    if (isBrowserNoise) {
-      httpAdapter.reply(response, 'Not Found', HttpStatus.NOT_FOUND);
+    // FIX: Handle asset failures with correct MIME types
+    if (url.endsWith('.css')) {
+      response.setHeader('Content-Type', 'text/css');
+      httpAdapter.reply(
+        response,
+        '/* Asset Not Found */',
+        HttpStatus.NOT_FOUND,
+      );
+      return;
+    }
+    if (url.endsWith('.js')) {
+      response.setHeader('Content-Type', 'application/javascript');
+      httpAdapter.reply(response, '// Asset Not Found', HttpStatus.NOT_FOUND);
+      return;
+    }
+    if (url.includes('favicon') || url.includes('.map')) {
+      httpAdapter.reply(response, '', HttpStatus.NOT_FOUND);
       return;
     }
 
     const httpStatus =
       exception instanceof HttpException
-        ? exception.getStatus() // FIX: Removed 'as number' (unnecessary assertion)
+        ? exception.getStatus()
         : (HttpStatus.INTERNAL_SERVER_ERROR as number);
 
     let message = 'Unknown error';
@@ -63,8 +68,7 @@ export class AllExceptionsFilter implements ExceptionFilter {
       message = exception.message;
     }
 
-    // 2. ONLY LOG ACTUAL API ERRORS
-    // FIX: Prettier formatting applied and parentheses added around enum cast
+    // Only log if it's an API route or a real server error
     if (
       httpStatus !== (HttpStatus.NOT_FOUND as number) ||
       url.startsWith('/api')
