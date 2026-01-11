@@ -8,27 +8,22 @@ import compression from 'compression';
 import * as sanitize from 'mongo-sanitize';
 import { Request, Response, NextFunction } from 'express';
 
-// 1. Define strict type for the Express instance to satisfy ESLint
 type ExpressInstance = (
   req: Request,
   res: Response,
   next?: NextFunction,
 ) => void;
-
 let cachedApp: ExpressInstance;
 
 async function bootstrap(): Promise<ExpressInstance> {
   if (!cachedApp) {
     const app = await NestFactory.create(AppModule);
 
-    // 2. Global Exception Filter (Error Checker)
     const httpAdapterHost = app.get(HttpAdapterHost);
     app.useGlobalFilters(new AllExceptionsFilter(httpAdapterHost));
 
-    // 3. Global Prefix (Separates API from Landing Page)
     app.setGlobalPrefix('api', { exclude: ['/'] });
 
-    // 4. Security Middleware (Helmet with Swagger CSP Fix)
     app.use(
       helmet({
         contentSecurityPolicy: {
@@ -42,7 +37,6 @@ async function bootstrap(): Promise<ExpressInstance> {
       }),
     );
 
-    // 5. Sanitization (Safe Double Cast for Strict ESLint)
     const sanitizeFn = sanitize as unknown as <T>(data: T) => T;
     app.use((req: Request, _res: Response, next: NextFunction) => {
       if (req.body) {
@@ -51,42 +45,47 @@ async function bootstrap(): Promise<ExpressInstance> {
       next();
     });
 
-    // 6. Performance & Global Validation
     app.use(compression());
     app.enableCors();
     app.useGlobalPipes(
-      new ValidationPipe({
-        whitelist: true,
-        forbidNonWhitelisted: true,
-        transform: true,
-      }),
+      new ValidationPipe({ whitelist: true, transform: true }),
     );
 
-    // 7. Swagger Setup (Documentation now at /api)
     const config = new DocumentBuilder()
       .setTitle('Moger Mulluk Api')
-      .setDescription('Engine of the Kingdom of Absolute Freedom.')
       .setVersion('1.0')
-      .addTag('Moger Mulluk')
       .build();
 
     const document = SwaggerModule.createDocument(app, config);
-    SwaggerModule.setup('api', app, document, {
+    // Moved to /api/docs to avoid conflict with health check
+    SwaggerModule.setup('api/docs', app, document, {
       customfavIcon: '/favicon.ico',
       customSiteTitle: 'Moger Mulluk API Docs',
     });
 
-    // 8. Initialize but do not app.listen (Vercel manages the port)
     await app.init();
     cachedApp = app
       .getHttpAdapter()
       .getInstance() as unknown as ExpressInstance;
+
+    // LOCAL DEVELOPMENT ONLY
+    if (process.env.VERCEL !== '1') {
+      const port = process.env.PORT || 3001;
+      await app.listen(port);
+      console.log(`🏰 Kingdom running on: http://localhost:${port}`);
+      console.log(`📜 Docs: http://localhost:3001/api/docs`);
+    }
   }
   return cachedApp;
 }
 
-// 9. VERCEL SERVERLESS HANDLER EXPORT
-export default async (req: Request, res: Response): Promise<void> => {
-  const appInstance = await bootstrap();
-  appInstance(req, res);
+// LOCAL START
+if (process.env.VERCEL !== '1') {
+  void bootstrap();
+}
+
+// VERCEL START
+export default async (req: Request, res: Response) => {
+  const app = await bootstrap();
+  return app(req, res);
 };
