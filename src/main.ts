@@ -29,30 +29,30 @@ async function bootstrap(): Promise<ExpressInstance> {
 
     app.setGlobalPrefix('api', { exclude: ['/'] });
 
+    // 1. FIXED HELMET: Added 'connect-src' and expanded 'script-src' for CDN
     app.use(
       helmet({
         contentSecurityPolicy: {
           directives: {
             defaultSrc: [`'self'`],
-            styleSrc: [`'self'`, `'unsafe-inline'`, 'https://cdn.jsdelivr.net'],
-            imgSrc: [`'self'`, 'data:', 'https://validator.swagger.io'],
-            scriptSrc: [
-              `'self'`,
-              `https: 'unsafe-inline'`,
-              'https://cdn.jsdelivr.net',
-            ],
+            styleSrc: [`'self'`, `'unsafe-inline'`, 'cdn.jsdelivr.net'],
+            scriptSrc: [`'self'`, `'unsafe-inline'`, 'cdn.jsdelivr.net'],
+            imgSrc: [`'self'`, 'data:', 'validator.swagger.io'],
+            connectSrc: [`'self'`, 'cdn.jsdelivr.net'], // Essential for .map files
           },
         },
       }),
     );
 
     const sanitizeFn = sanitize as unknown as <T>(data: T) => T;
-    app.use((req: Request, _res: Response, next: NextFunction) => {
+
+    // 2. FIXED BUILD ERROR: Use explicit callback type for next
+    app.use((req: Request, _res: Response, next: () => void) => {
       const request = req as RequestWithBody;
       if (request.body) {
         request.body = sanitizeFn(request.body);
       }
-      next(); // This is the line that caused the build error; it is now correctly typed
+      next();
     });
 
     app.use(compression());
@@ -68,7 +68,7 @@ async function bootstrap(): Promise<ExpressInstance> {
 
     const document = SwaggerModule.createDocument(app, config);
 
-    // FIX: Use CDN for Swagger Assets to prevent MIME/404 errors on Vercel
+    // 3. FIXED SWAGGER: Forced use of CDN and absolute URLs
     SwaggerModule.setup('api', app, document, {
       customfavIcon: '/favicon.ico',
       customSiteTitle: 'Moger Mulluk API Docs',
@@ -82,12 +82,6 @@ async function bootstrap(): Promise<ExpressInstance> {
     });
 
     await app.init();
-
-    if (process.env.NODE_ENV !== 'production' && !process.env.VERCEL) {
-      const port = process.env.PORT || 3001;
-      await app.listen(port);
-    }
-
     cachedApp = app
       .getHttpAdapter()
       .getInstance() as unknown as ExpressInstance;
@@ -95,11 +89,12 @@ async function bootstrap(): Promise<ExpressInstance> {
   return cachedApp;
 }
 
-export default async (req: Request, res: Response): Promise<void> => {
-  const appInstance = await bootstrap();
-  appInstance(req, res);
+export default async (req: Request, res: Response) => {
+  const app = await bootstrap();
+  return app(req, res);
 };
 
+// Added back for Local dev support
 if (process.env.NODE_ENV !== 'production' && !process.env.VERCEL) {
   void bootstrap();
 }
