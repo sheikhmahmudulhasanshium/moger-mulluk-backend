@@ -8,14 +8,12 @@ import compression from 'compression';
 import * as sanitize from 'mongo-sanitize';
 import { Request, Response, NextFunction } from 'express';
 
-// 1. Define strict types to satisfy ESLint
 type ExpressInstance = (
   req: Request,
   res: Response,
   next?: NextFunction,
 ) => void;
 
-// Interface to allow safe access to 'body' without using 'any'
 interface RequestWithBody extends Request {
   body: Record<string, unknown>;
 }
@@ -36,23 +34,25 @@ async function bootstrap(): Promise<ExpressInstance> {
         contentSecurityPolicy: {
           directives: {
             defaultSrc: [`'self'`],
-            styleSrc: [`'self'`, `'unsafe-inline'`],
-            imgSrc: [`'self'`, 'data:', 'validator.swagger.io'],
-            scriptSrc: [`'self'`, `https: 'unsafe-inline'`],
+            styleSrc: [`'self'`, `'unsafe-inline'`, 'https://cdn.jsdelivr.net'],
+            imgSrc: [`'self'`, 'data:', 'https://validator.swagger.io'],
+            scriptSrc: [
+              `'self'`,
+              `https: 'unsafe-inline'`,
+              'https://cdn.jsdelivr.net',
+            ],
           },
         },
       }),
     );
 
-    // 2. Sanitization (Strict ESLint Fix)
     const sanitizeFn = sanitize as unknown as <T>(data: T) => T;
     app.use((req: Request, _res: Response, next: NextFunction) => {
-      // Cast to our local interface instead of 'any'
       const request = req as RequestWithBody;
       if (request.body) {
         request.body = sanitizeFn(request.body);
       }
-      next();
+      next(); // This is the line that caused the build error; it is now correctly typed
     });
 
     app.use(compression());
@@ -67,14 +67,22 @@ async function bootstrap(): Promise<ExpressInstance> {
       .build();
 
     const document = SwaggerModule.createDocument(app, config);
+
+    // FIX: Use CDN for Swagger Assets to prevent MIME/404 errors on Vercel
     SwaggerModule.setup('api', app, document, {
       customfavIcon: '/favicon.ico',
       customSiteTitle: 'Moger Mulluk API Docs',
+      customJs: [
+        'https://cdn.jsdelivr.net/npm/swagger-ui-dist@5.11.0/swagger-ui-bundle.js',
+        'https://cdn.jsdelivr.net/npm/swagger-ui-dist@5.11.0/swagger-ui-standalone-preset.js',
+      ],
+      customCssUrl: [
+        'https://cdn.jsdelivr.net/npm/swagger-ui-dist@5.11.0/swagger-ui.css',
+      ],
     });
 
     await app.init();
 
-    // 3. Local Development Port Listener
     if (process.env.NODE_ENV !== 'production' && !process.env.VERCEL) {
       const port = process.env.PORT || 3001;
       await app.listen(port);
@@ -87,13 +95,11 @@ async function bootstrap(): Promise<ExpressInstance> {
   return cachedApp;
 }
 
-// 4. VERCEL HANDLER EXPORT
 export default async (req: Request, res: Response): Promise<void> => {
-  const app = await bootstrap();
-  app(req, res);
+  const appInstance = await bootstrap();
+  appInstance(req, res);
 };
 
-// 5. LOCAL STARTUP
 if (process.env.NODE_ENV !== 'production' && !process.env.VERCEL) {
   void bootstrap();
 }
