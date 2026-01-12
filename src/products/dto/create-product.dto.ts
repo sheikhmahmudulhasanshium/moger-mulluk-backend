@@ -1,4 +1,3 @@
-import { ApiProperty } from '@nestjs/swagger';
 import {
   IsString,
   IsObject,
@@ -10,17 +9,14 @@ import {
 } from 'class-validator';
 
 export class CreateProductDto {
-  @ApiProperty({ required: false })
   @IsString()
   @IsOptional()
-  shortId?: string; // Optional: System will generate if empty
+  shortId?: string;
 
-  @ApiProperty({ example: 1 })
   @IsNumber()
   @IsNotEmpty()
   position: number;
 
-  @ApiProperty({ enum: ['tea', 'coffee', 'beverage', 'desert', 'snacks'] })
   @IsEnum(['tea', 'coffee', 'beverage', 'desert', 'snacks'])
   category: string;
 

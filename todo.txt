@@ -30,3 +30,96 @@ moger-mulluk
       |_about
 
     need a fast responsive, search functionality
+
+This is your Master Architectural Plan to transition from a "Menu App" to a "Full-Scale E-commerce Engine" using the 3-Database Strategy.
+
+Save this plan. It is structured in 5 Logical Phases so you can implement them one by one when you are ready.
+
+Phase 1: Infrastructure (The Shop Connection)
+
+Objective: Connect the backend to the shop database without breaking the existing products logic.
+
+Update AppModule: Add the shop connection using MongooseModule.forRootAsync.
+
+Universal Key Policy: Enforce that the shortId (e.g., tea--01--plain-tea) is the only way to link data across products and shop. Never use MongoDB _id for cross-database relations.
+
+Phase 2: Inventory Decoupling (The Bridge)
+
+Objective: Move "Live Data" (Stock/Price) to the shop database while keeping "Catalog Data" (Title/Desc) in products.
+
+Create shop.inventory Schema:
+
+Fields: shortId, currentStock, isSelling, basePriceBDT, discount.
+
+Refactor ProductsService:
+
+When fetching detail, the service will now query products.menu (for the story) AND shop.inventory (for the stock) in parallel using Promise.all.
+
+Sync Logic:
+
+Update the Product "Create" endpoint so that it automatically creates a blank Inventory record in the shop database.
+
+Phase 3: The Order Management System (OMS)
+
+Objective: Enable sales and track revenue.
+
+Create shop.order Schema:
+
+Fields: orderId (MM-YYYY-XXXX), items (Array of shortId, qty, price at time of purchase), totalAmount, paymentStatus, orderStatus.
+
+Checkout Logic:
+
+Validate that all shortIds in the cart are isSelling: true in the Inventory collection.
+
+Calculate final BDT total on the server (Tax/Vat).
+
+Stock Deduction:
+
+On a successful order, trigger an atomic decrement ($inc: -qty) in the Inventory collection.
+
+Phase 4: Human Resources & shop.about
+
+Objective: Manage the kingdom's "Citizens" (Employees) and physical locations.
+
+Create shop.employee Schema:
+
+Fields: name, role (Barista/Manager/Admin), shift, isClockedIn.
+
+Create shop.about Schema:
+
+This is separate from metadata.about.
+
+metadata.about = The Brand Story.
+
+shop.about = Physical data: Branch Address, Google Maps Link, Phone Number, Operating Hours.
+
+Phase 5: Social Proof (Reviews)
+
+Objective: Collect customer feedback per product.
+
+Create shop.review Schema:
+
+Fields: shortId (Links to product), rating (1-5), comment, customerName, isVerifiedPurchase.
+
+Integration:
+
+Update the detail/:lang/:shortId endpoint to also return the Average Rating and top 3 reviews.
+
+Critical Suggestion: The "Kingdom API" Strategy
+
+To keep Vercel fast as you add these databases:
+
+Caching Strategy: Use Redis (or Vercel KV) for the products.menu. Since it rarely changes, don't hit MongoDB every time.
+
+Atomic Updates: For Inventory stock, always use MongoDB's $inc operator. This prevents "Race Conditions" where two people buy the last cup of tea at the same time.
+
+Security: As soon as you start Phase 3, you must implement Auth (JWT) to protect the shop data.
+
+Summary of Cross-DB Linkage:
+Database	Collection	Connecting Key	Use Case
+Products	menu	shortId	Displaying names/images
+Shop	inventory	shortId	Checking stock/price
+Shop	review	shortId	Displaying star ratings
+Shop	order	shortId	Tracking what was sold
+
+This plan keeps your catalog clean and your business operations secure. You are ready to build the next phase whenever you wish.

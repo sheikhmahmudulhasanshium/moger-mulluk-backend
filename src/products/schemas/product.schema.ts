@@ -6,7 +6,7 @@ export class Product extends Document {
   declare _id: Types.ObjectId;
 
   @Prop({ required: true, unique: true, index: true })
-  shortId: string; // e.g., 'tea--01--plain-tea'
+  shortId: string;
 
   @Prop({ default: 0, index: true })
   position: number;
@@ -39,15 +39,12 @@ export class Product extends Document {
   @Prop({ type: Object })
   funFact: Record<string, string>;
 
-  @Prop({
-    type: Object,
-    required: true,
-  })
+  @Prop({ type: Object, required: true })
   logistics: {
     stock: number;
     isAvailable: boolean;
     grandTotal: number;
-    uKey: string; // c=Cup, g=Glass
+    uKey: string;
     calories: number;
   };
 
@@ -62,3 +59,17 @@ export class Product extends Document {
 }
 
 export const ProductSchema = SchemaFactory.createForClass(Product);
+
+// Text Indexing for broad language searching
+ProductSchema.index({
+  'title.en': 'text',
+  'title.bn': 'text',
+  'title.hi': 'text',
+  'title.es': 'text',
+  'description.en': 'text',
+  'description.bn': 'text',
+  'ingredients.en': 'text',
+  'ingredients.bn': 'text',
+  tags: 'text',
+  shortId: 'text',
+});
