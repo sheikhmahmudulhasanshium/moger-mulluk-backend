@@ -9,6 +9,7 @@ import { AppController } from './app.controller';
 import { AppService } from './app.service';
 import { LanguagesModule } from './languages/languages.module'; // Import this
 import { FaqModule } from './faq/faq.module';
+import { ProductsModule } from './products/products.module';
 @Module({
   imports: [
     ConfigModule.forRoot({ isGlobal: true }),
@@ -44,6 +45,8 @@ import { FaqModule } from './faq/faq.module';
     FaqModule,
 
     ThrottlerModule.forRoot([{ ttl: 60000, limit: 20 }]),
+
+    ProductsModule,
   ],
   controllers: [AppController],
   providers: [AppService, { provide: APP_GUARD, useClass: ThrottlerGuard }],

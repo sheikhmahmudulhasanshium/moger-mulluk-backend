@@ -13,7 +13,6 @@ src/
 └── main.ts                     # Vercel entry point
 
 
-
 moger-mulluk
 |_cluster-0
   |_metadata
@@ -21,8 +20,13 @@ moger-mulluk
     |_about
     |_faq
   |_products
-    |_[tea]
-    |_[coffee]
-    |_[other_beverages]
-    |_[snacks]
-    
+    |_menu_short
+    |_menu_details
+  |_shop
+      |_inventory
+      |_order
+      |_employee
+      |_review
+      |_about
+
+    need a fast responsive, search functionality
