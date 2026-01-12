@@ -10,6 +10,7 @@ import { AppService } from './app.service';
 import { LanguagesModule } from './languages/languages.module'; // Import this
 import { FaqModule } from './faq/faq.module';
 import { ProductsModule } from './products/products.module';
+import { PagesModule } from './pages/pages.module';
 @Module({
   imports: [
     ConfigModule.forRoot({ isGlobal: true }),
@@ -47,6 +48,8 @@ import { ProductsModule } from './products/products.module';
     ThrottlerModule.forRoot([{ ttl: 60000, limit: 20 }]),
 
     ProductsModule,
+
+    PagesModule,
   ],
   controllers: [AppController],
   providers: [AppService, { provide: APP_GUARD, useClass: ThrottlerGuard }],

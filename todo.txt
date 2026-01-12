@@ -19,6 +19,8 @@ moger-mulluk
     |_languages
     |_about
     |_faq
+    |_notices
+    |_pages
   |_products
     |_menu_short
     |_menu_details
