@@ -5,8 +5,16 @@ import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import { AllExceptionsFilter } from './all-exceptions.filter';
 import helmet from 'helmet';
 import compression from 'compression';
-import * as sanitize from 'mongo-sanitize';
+import * as mongoSanitize from 'mongo-sanitize';
 import { Request, Response, NextFunction } from 'express';
+
+// Define the shape of the sanitize function for type safety
+type SanitizeFn = <T>(data: T) => T;
+
+// Define the shape of the imported module to satisfy ESLint
+interface MongoSanitizeModule {
+  default: SanitizeFn;
+}
 
 // Define interface to handle strict body typing
 interface SanitizeRequest extends Request {
@@ -30,7 +38,6 @@ async function bootstrap(): Promise<INestApplication> {
   app.setGlobalPrefix('api', { exclude: ['/'] });
 
   // 2. Security & Middleware
-  // ContentSecurityPolicy is disabled to allow Swagger CDN assets to load
   app.use(
     helmet({
       contentSecurityPolicy: false,
@@ -38,14 +45,20 @@ async function bootstrap(): Promise<INestApplication> {
     }),
   );
 
-  const sanitizeFn = sanitize as <T>(data: T) => T;
+  /**
+   * FIX: Type-safe extraction of the sanitize function.
+   * We cast to 'unknown' first, then to a specific interface
+   * instead of 'any' to satisfy @typescript-eslint/no-unsafe-member-access.
+   */
+  const sanitizeFn =
+    typeof mongoSanitize === 'function'
+      ? (mongoSanitize as unknown as SanitizeFn)
+      : (mongoSanitize as unknown as MongoSanitizeModule).default;
+
   app.use((req: Request, _res: Response, next: NextFunction) => {
     const sanitizeReq = req as unknown as SanitizeRequest;
-    if (sanitizeReq.body) {
-      sanitizeReq.body = sanitizeFn(sanitizeReq.body) as unknown as Record<
-        string,
-        unknown
-      >;
+    if (sanitizeReq.body && typeof sanitizeFn === 'function') {
+      sanitizeReq.body = sanitizeFn(sanitizeReq.body);
     }
     next();
   });
@@ -61,7 +74,6 @@ async function bootstrap(): Promise<INestApplication> {
     .build();
   const document = SwaggerModule.createDocument(app, config);
 
-  // Use reliable CDN for Swagger UI to avoid Vercel 404/MIME errors
   SwaggerModule.setup('api', app, document, {
     customSiteTitle: 'Moger Mulluk API Docs',
     customfavIcon: 'https://swagger.io/favicon.ico',
