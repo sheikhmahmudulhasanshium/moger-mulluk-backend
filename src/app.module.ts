@@ -11,9 +11,13 @@ import { LanguagesModule } from './languages/languages.module'; // Import this
 import { FaqModule } from './faq/faq.module';
 import { ProductsModule } from './products/products.module';
 import { PagesModule } from './pages/pages.module';
+import { CloudinaryModule } from './common/cloudinary/cloudinary.module';
+import { Media, MediaSchema } from './media/media.schema';
+import { MediaModule } from './media/media.module';
 @Module({
   imports: [
     ConfigModule.forRoot({ isGlobal: true }),
+    CloudinaryModule,
 
     ServeStaticModule.forRoot({
       rootPath: join(process.cwd(), 'public'),
@@ -41,7 +45,11 @@ import { PagesModule } from './pages/pages.module';
       },
       inject: [ConfigService],
     }),
-
+    // Inside AppModule imports:
+    MongooseModule.forFeature(
+      [{ name: Media.name, schema: MediaSchema }],
+      'metadata',
+    ),
     LanguagesModule,
     FaqModule,
 
@@ -50,6 +58,7 @@ import { PagesModule } from './pages/pages.module';
     ProductsModule,
 
     PagesModule,
+    MediaModule,
   ],
   controllers: [AppController],
   providers: [AppService, { provide: APP_GUARD, useClass: ThrottlerGuard }],

@@ -12,6 +12,10 @@ src/
 │       └── content.controller.ts
 └── main.ts                     # Vercel entry point
 
+i have an api, i wanna upload image/video/other files using nest js
+https://cloudinary.com/blog/guest_post/signed-image-uploading-to-cloudinary-with-angular-and-nestjs
+i want my current serverless function dont crash it should work both on localhost and vercel production https://moger-mulluk-backend.vercel.app/api
+here is my current codebase
 
 moger-mulluk
 |_cluster-0
