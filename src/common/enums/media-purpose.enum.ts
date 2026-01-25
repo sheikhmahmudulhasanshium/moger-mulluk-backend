@@ -15,4 +15,5 @@ export enum MediaPurpose {
   FEEDBACK = 'feedback', // Images from customer reviews
   LEGAL = 'legal', // Licenses or certifications
   GENERAL = 'general', // <--- Added this
+  GALLRY = 'gallery', // Portfolio or project showcases
 }
