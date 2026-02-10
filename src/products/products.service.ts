@@ -21,13 +21,11 @@ interface ProductCardProjection {
   logistics: { grandTotal: number; uKey: string };
   media?: { thumbnail: string };
 }
-
 interface StatsAggregationResult {
   totalCount: { count: number }[];
   byCategory: { _id: string; count: number }[];
   availableCount: { count: number }[];
 }
-
 interface UnitSet {
   c: string;
   g: string;
@@ -37,10 +35,9 @@ interface UnitSet {
 export class ProductsService {
   constructor(
     @InjectModel(Product.name, 'products') private prodModel: Model<Product>,
-    private cloudinaryService: CloudinaryService, // New Injection
+    private cloudinaryService: CloudinaryService,
   ) {}
 
-  // --- NEW MEDIA UPLOAD METHOD ---
   async uploadProductMedia(
     id: string,
     files: {
@@ -48,41 +45,29 @@ export class ProductsService {
       gallery?: Express.Multer.File[];
     },
   ) {
-    if (!files) {
-      throw new BadRequestException(
-        'No files were uploaded. Make sure to use multipart/form-data',
-      );
-    }
-
     const product = await this.prodModel.findById(id);
     if (!product) throw new NotFoundException('Product not found');
-
     const mediaUpdate = {
       thumbnail: product.media?.thumbnail || '',
       gallery: product.media?.gallery || [],
     };
-
-    // 1. Upload Thumbnail (Replace existing)
     if (files.thumbnail?.length) {
-      const file = files.thumbnail[0];
-      const publicId = `thumb_${product.shortId}_${Date.now()}`;
-      const result = await this.cloudinaryService.uploadBuffer(file, publicId);
-      mediaUpdate.thumbnail = result.secure_url;
+      const res = await this.cloudinaryService.uploadBuffer(
+        files.thumbnail[0],
+        `thumb_${product.shortId}_${Date.now()}`,
+      );
+      mediaUpdate.thumbnail = res.secure_url;
     }
-
-    // 2. Upload Gallery Images (Append to existing)
     if (files.gallery?.length) {
-      const uploadPromises = files.gallery.map((file, index) => {
-        const publicId = `gal_${product.shortId}_${Date.now()}_${index}`;
-        return this.cloudinaryService.uploadBuffer(file, publicId);
-      });
-
-      const results = await Promise.all(uploadPromises);
-      const urls = results.map((r) => r.secure_url);
-      mediaUpdate.gallery.push(...urls);
+      const promises = files.gallery.map((f, i) =>
+        this.cloudinaryService.uploadBuffer(
+          f,
+          `gal_${product.shortId}_${Date.now()}_${i}`,
+        ),
+      );
+      const results = await Promise.all(promises);
+      mediaUpdate.gallery.push(...results.map((r) => r.secure_url));
     }
-
-    // 3. Save to Database
     return await this.prodModel.findByIdAndUpdate(
       id,
       { $set: { media: mediaUpdate } },
@@ -90,18 +75,29 @@ export class ProductsService {
     );
   }
 
-  // --- EXISTING METHODS (UNCHANGED) ---
+  async updateMediaOrder(id: string, dto: UpdateMediaOrderDto) {
+    const updated = await this.prodModel.findByIdAndUpdate(
+      id,
+      {
+        $set: {
+          'media.thumbnail': dto.thumbnail,
+          'media.gallery': dto.gallery,
+        },
+      },
+      { new: true },
+    );
+    if (!updated) throw new NotFoundException('Product not found');
+    return updated;
+  }
+
   async create(dto: CreateProductDto): Promise<Product> {
-    if (!dto.title?.en)
-      throw new BadRequestException('English (en) Title is required');
+    if (!dto.title?.en) throw new BadRequestException('English title required');
     const slug = slugify(dto.title.en, { lower: true, strict: true });
-    const paddedPos = String(dto.position).padStart(2, '0');
-    const generatedShortId = `${dto.category}--${paddedPos}--${slug}`;
-    const created = new this.prodModel({
+    const shortId = `${dto.category}--${String(dto.position).padStart(2, '0')}--${slug}`;
+    return await new this.prodModel({
       ...dto,
-      shortId: dto.shortId || generatedShortId,
-    });
-    return await created.save();
+      shortId: dto.shortId || shortId,
+    }).save();
   }
 
   async getMenuCards(lang: string, page = 1, limit = 10, category?: string) {
@@ -122,7 +118,7 @@ export class ProductsService {
       .exec()) as unknown as ProductCardProjection[];
     const totalItems = await this.prodModel.countDocuments(query);
     return {
-      data: items.map((item) => this.transformToCard(item, lang)),
+      data: items.map((i) => this.transformToCard(i, lang)),
       meta: {
         totalItems,
         totalPages: Math.ceil(totalItems / limit),
@@ -131,13 +127,12 @@ export class ProductsService {
     };
   }
 
-  async searchProducts(lang: string, queryDto: SearchQueryDto) {
-    const { q, cat, page = 1, limit = 10 } = queryDto;
-    const skip = (page - 1) * limit;
-    const regex = { $regex: q, $options: 'i' };
+  async searchProducts(lang: string, dto: SearchQueryDto) {
+    const skip = (dto.page || 1 - 1) * (dto.limit || 10);
+    const regex = { $regex: dto.q, $options: 'i' };
     const filter = {
       'logistics.isAvailable': true,
-      ...(cat ? { category: cat } : {}),
+      ...(dto.cat ? { category: dto.cat } : {}),
       $or: [
         { 'title.en': regex },
         { 'title.bn': regex },
@@ -147,7 +142,7 @@ export class ProductsService {
         { 'description.bn': regex },
         { 'ingredients.en': regex },
         { 'ingredients.bn': regex },
-        { tags: { $in: [new RegExp(q, 'i')] } },
+        { tags: { $in: [new RegExp(dto.q, 'i')] } },
         { shortId: regex },
       ],
     };
@@ -158,17 +153,13 @@ export class ProductsService {
       )
       .sort({ position: 1 })
       .skip(skip)
-      .limit(limit)
+      .limit(dto.limit || 10)
       .lean()
       .exec()) as unknown as ProductCardProjection[];
     const totalItems = await this.prodModel.countDocuments(filter);
     return {
-      data: items.map((item) => this.transformToCard(item, lang)),
-      meta: {
-        totalItems,
-        totalPages: Math.ceil(totalItems / limit),
-        currentPage: page,
-      },
+      data: items.map((i) => this.transformToCard(i, lang)),
+      meta: { totalItems, currentPage: dto.page || 1 },
     };
   }
 
@@ -176,6 +167,12 @@ export class ProductsService {
     const item = await this.prodModel.findOne({ shortId }).exec();
     if (!item) throw new NotFoundException('Product not found');
     return this.transformToDetail(item, lang);
+  }
+
+  async findOne(id: string) {
+    const product = await this.prodModel.findById(id).exec();
+    if (!product) throw new NotFoundException('Product not found');
+    return product;
   }
 
   async findAllRaw(page = 1, limit = 20) {
@@ -198,25 +195,7 @@ export class ProductsService {
       },
     };
   }
-  // Inside ProductsService class
-  async updateMediaOrder(id: string, dto: UpdateMediaOrderDto) {
-    const product = await this.prodModel.findById(id);
-    if (!product) throw new NotFoundException('Product not found');
 
-    // We update the media object with the new strings provided by the frontend
-    const updated = await this.prodModel.findByIdAndUpdate(
-      id,
-      {
-        $set: {
-          'media.thumbnail': dto.thumbnail,
-          'media.gallery': dto.gallery,
-        },
-      },
-      { new: true },
-    );
-
-    return updated;
-  }
   async getProductStats() {
     const stats = await this.prodModel
       .aggregate([
@@ -239,26 +218,21 @@ export class ProductsService {
     return {
       total: result.totalCount[0]?.count || 0,
       available: result.availableCount[0]?.count || 0,
-      breakdown: result.byCategory.map((item) => ({
-        category: item._id,
-        count: item.count,
+      breakdown: result.byCategory.map((i) => ({
+        category: i._id,
+        count: i.count,
       })),
       timestamp: new Date().toISOString(),
     };
   }
 
   async update(id: string, dto: UpdateProductDto) {
-    const updated = await this.prodModel
+    return await this.prodModel
       .findByIdAndUpdate(id, dto, { new: true })
       .exec();
-    if (!updated) throw new NotFoundException('Product not found');
-    return updated;
   }
-
   async remove(id: string) {
-    const deleted = await this.prodModel.findByIdAndDelete(id).exec();
-    if (!deleted) throw new NotFoundException('Product not found');
-    return { deleted: true };
+    return await this.prodModel.findByIdAndDelete(id).exec();
   }
 
   private transformToCard(item: ProductCardProjection, lang: string) {
@@ -270,7 +244,6 @@ export class ProductsService {
     return {
       shortId: item.shortId,
       category: item.category,
-      tags: item.tags,
       title: item.title[lang] || item.title['en'] || '',
       price: item.logistics.grandTotal,
       unit: item.logistics.uKey === 'c' ? t_unit.c : t_unit.g,
@@ -285,28 +258,14 @@ export class ProductsService {
     };
     const t_unit = unitMap[lang] || unitMap['en'];
     const title = item.title,
-      desc = item.description,
-      ing = item.ingredients || {},
-      ben = item.healthBenefit || {},
-      ori = item.origin || {},
-      fac = item.funFact || {};
+      desc = item.description;
     return {
       shortId: item.shortId,
-      category: item.category,
-      tags: item.tags,
       title: title[lang] || title['en'] || '',
       description: desc[lang] || desc['en'] || '',
       price: item.logistics.grandTotal,
       unit: item.logistics.uKey === 'c' ? t_unit.c : t_unit.g,
-      calories: `${item.logistics.calories} kcal`,
       media: item.media,
-      details: {
-        ingredients: ing[lang] || ing['en'] || '',
-        benefit: ben[lang] || ben['en'] || '',
-        origin: ori[lang] || ori['en'] || '',
-        fact: fac[lang] || fac['en'] || '',
-      },
-      stockStatus: item.logistics.stock > 0 ? 'In Stock' : 'Out of Stock',
     };
   }
 }

@@ -16,31 +16,78 @@ import { ProductsService } from './products.service';
 import { CreateProductDto } from './dto/create-product.dto';
 import { UpdateProductDto } from './dto/update-product.dto';
 import { SearchQueryDto } from './dto/search-query.dto';
-import { ApiTags, ApiOperation, ApiConsumes, ApiBody } from '@nestjs/swagger';
 import { UpdateMediaOrderDto } from './dto/update-media-order.dto';
+import { ApiTags, ApiOperation, ApiConsumes, ApiBody } from '@nestjs/swagger';
 
 @ApiTags('Products')
 @Controller('products')
 export class ProductsController {
   constructor(private readonly productsService: ProductsService) {}
 
+  @Post()
+  @ApiOperation({ summary: 'Admin: Create product' })
+  create(@Body() dto: CreateProductDto) {
+    return this.productsService.create(dto);
+  }
+
+  @Get('stats/count')
+  @ApiOperation({ summary: 'System: Get counts' })
+  getProductCount() {
+    return this.productsService.getProductStats();
+  }
+
+  @Get('admin/raw')
+  @ApiOperation({ summary: 'Admin: Get all raw documents' })
+  findAllRaw(@Query('page') p?: string, @Query('limit') l?: string) {
+    return this.productsService.findAllRaw(
+      p ? parseInt(p) : 1,
+      l ? parseInt(l) : 20,
+    );
+  }
+
+  @Get('search/:lang')
+  @ApiOperation({ summary: 'Public: Search by keywords' })
+  search(@Param('lang') lang: string, @Query() q: SearchQueryDto) {
+    return this.productsService.searchProducts(lang, q);
+  }
+
+  @Get('menu/:lang')
+  @ApiOperation({ summary: 'Public: Get card view menu' })
+  getMenu(
+    @Param('lang') lang: string,
+    @Query('page') p?: string,
+    @Query('limit') l?: string,
+    @Query('cat') c?: string,
+  ) {
+    return this.productsService.getMenuCards(
+      lang,
+      p ? parseInt(p) : 1,
+      l ? parseInt(l) : 10,
+      c,
+    );
+  }
+
+  @Get('detail/:lang/:shortId')
+  @ApiOperation({ summary: 'Public: Get full product details' })
+  getDetail(@Param('lang') lang: string, @Param('shortId') sid: string) {
+    return this.productsService.getProductDetail(sid, lang);
+  }
+
+  @Get(':id')
+  @ApiOperation({ summary: 'Admin: Get single raw product by Mongo ID' })
+  findOne(@Param('id') id: string) {
+    return this.productsService.findOne(id);
+  }
+
   @Patch(':id/media')
-  @ApiOperation({ summary: 'Admin: Upload product images' })
+  @ApiOperation({ summary: 'Admin: Upload images' })
   @ApiConsumes('multipart/form-data')
   @ApiBody({
     schema: {
       type: 'object',
       properties: {
-        thumbnail: {
-          type: 'string',
-          format: 'binary',
-          description: 'One image file',
-        },
-        gallery: {
-          type: 'array',
-          items: { type: 'string', format: 'binary' },
-          description: 'Multiple image files',
-        },
+        thumbnail: { type: 'string', format: 'binary' },
+        gallery: { type: 'array', items: { type: 'string', format: 'binary' } },
       },
     },
   })
@@ -58,73 +105,29 @@ export class ProductsController {
       gallery?: Express.Multer.File[];
     },
   ) {
-    if (!files || (!files.thumbnail && !files.gallery)) {
-      throw new BadRequestException('No files provided in the request');
-    }
+    if (!files || (!files.thumbnail && !files.gallery))
+      throw new BadRequestException('No files provided');
     return this.productsService.uploadProductMedia(id, files);
   }
 
-  @Post()
-  @ApiOperation({ summary: 'Admin: Create product' })
-  create(@Body() createProductDto: CreateProductDto) {
-    return this.productsService.create(createProductDto);
-  }
-
-  @Get('stats/count')
-  @ApiOperation({ summary: 'System: Get counts' })
-  getProductCount() {
-    return this.productsService.getProductStats();
-  }
-
-  @Get('search/:lang')
-  search(@Param('lang') lang: string, @Query() query: SearchQueryDto) {
-    return this.productsService.searchProducts(lang, query);
-  }
-
-  @Get('menu/:lang')
-  getMenu(
-    @Param('lang') lang: string,
-    @Query('page') page?: string,
-    @Query('limit') limit?: string,
-    @Query('cat') cat?: string,
-  ) {
-    return this.productsService.getMenuCards(
-      lang,
-      page ? parseInt(page) : 1,
-      limit ? parseInt(limit) : 10,
-      cat,
-    );
-  }
-
-  @Get('detail/:lang/:shortId')
-  getDetail(@Param('lang') lang: string, @Param('shortId') shortId: string) {
-    return this.productsService.getProductDetail(shortId, lang);
-  }
-
-  @Get('admin/raw')
-  findAllRaw(@Query('page') page?: string, @Query('limit') limit?: string) {
-    return this.productsService.findAllRaw(
-      page ? parseInt(page) : 1,
-      limit ? parseInt(limit) : 20,
-    );
-  }
-
-  @Patch(':id')
-  update(@Param('id') id: string, @Body() updateProductDto: UpdateProductDto) {
-    return this.productsService.update(id, updateProductDto);
-  }
-
-  @Delete(':id')
-  remove(@Param('id') id: string) {
-    return this.productsService.remove(id);
-  } // Add UpdateMediaOrderDto to imports
-  // Inside ProductsController class
   @Patch(':id/media/reorder')
   @ApiOperation({ summary: 'Admin: Reorder gallery or swap thumbnail' })
   async updateMediaOrder(
     @Param('id') id: string,
-    @Body() updateMediaOrderDto: UpdateMediaOrderDto,
+    @Body() dto: UpdateMediaOrderDto,
   ) {
-    return this.productsService.updateMediaOrder(id, updateMediaOrderDto);
+    return this.productsService.updateMediaOrder(id, dto);
+  }
+
+  @Patch(':id')
+  @ApiOperation({ summary: 'Admin: Update product' })
+  update(@Param('id') id: string, @Body() dto: UpdateProductDto) {
+    return this.productsService.update(id, dto);
+  }
+
+  @Delete(':id')
+  @ApiOperation({ summary: 'Admin: Delete product' })
+  remove(@Param('id') id: string) {
+    return this.productsService.remove(id);
   }
 }
