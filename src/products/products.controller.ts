@@ -31,7 +31,7 @@ export class ProductsController {
   }
 
   @Get('stats/count')
-  @ApiOperation({ summary: 'System: Get counts' })
+  @ApiOperation({ summary: 'System: Get stats' })
   getProductCount() {
     return this.productsService.getProductStats();
   }
@@ -68,13 +68,13 @@ export class ProductsController {
   }
 
   @Get('detail/:lang/:shortId')
-  @ApiOperation({ summary: 'Public: Get full product details' })
+  @ApiOperation({ summary: 'Public: Get full details' })
   getDetail(@Param('lang') lang: string, @Param('shortId') sid: string) {
     return this.productsService.getProductDetail(sid, lang);
   }
 
   @Get(':id')
-  @ApiOperation({ summary: 'Admin: Get single raw product by Mongo ID' })
+  @ApiOperation({ summary: 'Admin: Get by Mongo ID' })
   findOne(@Param('id') id: string) {
     return this.productsService.findOne(id);
   }
@@ -106,12 +106,12 @@ export class ProductsController {
     },
   ) {
     if (!files || (!files.thumbnail && !files.gallery))
-      throw new BadRequestException('No files provided');
+      throw new BadRequestException('No files');
     return this.productsService.uploadProductMedia(id, files);
   }
 
   @Patch(':id/media/reorder')
-  @ApiOperation({ summary: 'Admin: Reorder gallery or swap thumbnail' })
+  @ApiOperation({ summary: 'Admin: Reorder gallery' })
   async updateMediaOrder(
     @Param('id') id: string,
     @Body() dto: UpdateMediaOrderDto,

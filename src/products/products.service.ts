@@ -100,6 +100,33 @@ export class ProductsService {
     }).save();
   }
 
+  async findOne(id: string) {
+    const item = await this.prodModel.findById(id).exec();
+    if (!item) throw new NotFoundException('Product not found');
+    return item;
+  }
+
+  async findAllRaw(page = 1, limit = 20) {
+    const skip = (page - 1) * limit;
+    const [totalItems, data] = await Promise.all([
+      this.prodModel.countDocuments(),
+      this.prodModel
+        .find()
+        .sort({ position: 1 })
+        .skip(skip)
+        .limit(limit)
+        .exec(),
+    ]);
+    return {
+      data,
+      meta: {
+        totalItems,
+        totalPages: Math.ceil(totalItems / limit),
+        currentPage: page,
+      },
+    };
+  }
+
   async getMenuCards(lang: string, page = 1, limit = 10, category?: string) {
     const skip = (page - 1) * limit;
     const query = {
@@ -119,18 +146,12 @@ export class ProductsService {
     const totalItems = await this.prodModel.countDocuments(query);
     return {
       data: items.map((i) => this.transformToCard(i, lang)),
-      meta: {
-        totalItems,
-        totalPages: Math.ceil(totalItems / limit),
-        currentPage: page,
-      },
+      meta: { totalItems, currentPage: page },
     };
   }
 
   async searchProducts(lang: string, dto: SearchQueryDto) {
-    const page = dto.page || 1;
-    const limit = dto.limit || 10;
-    const skip = (page - 1) * limit;
+    const skip = ((dto.page || 1) - 1) * (dto.limit || 10);
     const regex = { $regex: dto.q, $options: 'i' };
     const filter = {
       'logistics.isAvailable': true,
@@ -155,46 +176,13 @@ export class ProductsService {
       )
       .sort({ position: 1 })
       .skip(skip)
-      .limit(limit)
+      .limit(dto.limit || 10)
       .lean()
       .exec()) as unknown as ProductCardProjection[];
     const totalItems = await this.prodModel.countDocuments(filter);
     return {
       data: items.map((i) => this.transformToCard(i, lang)),
-      meta: { totalItems, currentPage: page },
-    };
-  }
-
-  async getProductDetail(shortId: string, lang: string) {
-    const item = await this.prodModel.findOne({ shortId }).exec();
-    if (!item) throw new NotFoundException('Product not found');
-    return this.transformToDetail(item, lang);
-  }
-
-  async findOne(id: string) {
-    const product = await this.prodModel.findById(id).exec();
-    if (!product) throw new NotFoundException('Product not found');
-    return product;
-  }
-
-  async findAllRaw(page = 1, limit = 20) {
-    const skip = (page - 1) * limit;
-    const [totalItems, data] = await Promise.all([
-      this.prodModel.countDocuments(),
-      this.prodModel
-        .find()
-        .sort({ position: 1 })
-        .skip(skip)
-        .limit(limit)
-        .exec(),
-    ]);
-    return {
-      data,
-      meta: {
-        totalItems,
-        totalPages: Math.ceil(totalItems / limit),
-        currentPage: page,
-      },
+      meta: { totalItems, currentPage: dto.page || 1 },
     };
   }
 
@@ -226,6 +214,12 @@ export class ProductsService {
       })),
       timestamp: new Date().toISOString(),
     };
+  }
+
+  async getProductDetail(shortId: string, lang: string) {
+    const item = await this.prodModel.findOne({ shortId }).exec();
+    if (!item) throw new NotFoundException('Product not found');
+    return this.transformToDetail(item, lang);
   }
 
   async update(id: string, dto: UpdateProductDto) {

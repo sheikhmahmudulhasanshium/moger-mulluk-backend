@@ -18,21 +18,32 @@ import { MediaModule } from './media/media.module';
     ConfigModule.forRoot({ isGlobal: true }),
     CloudinaryModule,
 
-    // Use dbName option instead of string concatenation to prevent URI errors
+    // Recommendation: One default connection for serverless stability
     MongooseModule.forRootAsync({
-      connectionName: 'metadata',
       useFactory: (config: ConfigService) => ({
         uri: config.get<string>('MONGODB_URI'),
-        dbName: 'metadata', // Safe way to specify database
+        dbName: 'moger_mulluk_v2', // Use one primary database
+        serverSelectionTimeoutMS: 5000,
+      }),
+      inject: [ConfigService],
+    }),
+
+    // Keep named connections only if they point to different clusters
+    // Otherwise, map them to the default connection for stability
+    MongooseModule.forRootAsync({
+      connectionName: 'products',
+      useFactory: (config: ConfigService) => ({
+        uri: config.get<string>('MONGODB_URI'),
+        dbName: 'products',
       }),
       inject: [ConfigService],
     }),
 
     MongooseModule.forRootAsync({
-      connectionName: 'products',
+      connectionName: 'metadata',
       useFactory: (config: ConfigService) => ({
         uri: config.get<string>('MONGODB_URI'),
-        dbName: 'products', // Safe way to specify database
+        dbName: 'metadata',
       }),
       inject: [ConfigService],
     }),
