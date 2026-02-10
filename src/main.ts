@@ -25,8 +25,9 @@ let cachedApp: ExpressInstance;
 
 async function bootstrap(): Promise<INestApplication> {
   const app = await NestFactory.create(AppModule);
-  // FIX: Cast through unknown to satisfy Lint "Unsafe Assignment"
-  const httpAdapterHost = app.get(HttpAdapterHost);
+
+  // FIX: Added <HttpAdapterHost> to resolve "@typescript-eslint/no-unsafe-assignment"
+  const httpAdapterHost = app.get<HttpAdapterHost>(HttpAdapterHost);
 
   app.useGlobalFilters(new AllExceptionsFilter(httpAdapterHost));
   app.setGlobalPrefix('api', { exclude: ['/'] });
@@ -44,7 +45,7 @@ async function bootstrap(): Promise<INestApplication> {
     if (sanitizeReq.body && typeof sanitizeFn === 'function') {
       sanitizeReq.body = sanitizeFn(sanitizeReq.body);
     }
-    // FIX: Cast to function to satisfy Vercel
+    // FIX: Cast as function to satisfy Vercel
     (next as () => void)();
   });
 
@@ -56,12 +57,21 @@ async function bootstrap(): Promise<INestApplication> {
     .setTitle('Moger Mulluk Api')
     .setVersion('1.0')
     .build();
-  SwaggerModule.setup('api', app, SwaggerModule.createDocument(app, config));
+  const document = SwaggerModule.createDocument(app, config);
+  SwaggerModule.setup('api', app, document, {
+    customSiteTitle: 'Moger Mulluk API Docs',
+    customJs: [
+      'https://cdn.jsdelivr.net/npm/swagger-ui-dist@5.11.2/swagger-ui-bundle.js',
+      'https://cdn.jsdelivr.net/npm/swagger-ui-dist@5.11.2/swagger-ui-standalone-preset.js',
+    ],
+    customCssUrl: [
+      'https://cdn.jsdelivr.net/npm/swagger-ui-dist@5.11.2/swagger-ui.css',
+    ],
+  });
 
   return app;
 }
 
-// VERCEL EXPORT
 export default async (req: Request, res: Response): Promise<void> => {
   try {
     if (!cachedApp) {
@@ -74,7 +84,7 @@ export default async (req: Request, res: Response): Promise<void> => {
     cachedApp(req, res);
   } catch (err: unknown) {
     console.error('VERCEL_CRASH:', err);
-    // FIX: Use native Node.js methods to bypass "status does not exist" build error
+    // FIX: Use native Node.js methods to satisfy TS Compiler and ESLint "unsafe" rules
     res.statusCode = 500;
     res.setHeader('Content-Type', 'application/json');
     res.end(

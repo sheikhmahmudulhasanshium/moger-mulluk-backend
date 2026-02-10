@@ -31,7 +31,7 @@ export class ProductsController {
   }
 
   @Get('stats/count')
-  @ApiOperation({ summary: 'System: Get stats' })
+  @ApiOperation({ summary: 'System: Get counts' })
   getProductCount() {
     return this.productsService.getProductStats();
   }

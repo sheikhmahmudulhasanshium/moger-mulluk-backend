@@ -22,9 +22,8 @@ interface ProductCardProjection {
   media?: { thumbnail: string };
 }
 interface StatsAggregationResult {
-  totalCount: { count: number }[];
-  byCategory: { _id: string; count: number }[];
-  availableCount: { count: number }[];
+  total: { c: number }[];
+  cat: { _id: string; c: number }[];
 }
 interface UnitSet {
   c: string;
@@ -47,16 +46,17 @@ export class ProductsService {
   ) {
     const product = await this.prodModel.findById(id);
     if (!product) throw new NotFoundException('Product not found');
-    const mediaUpdate = {
+    const media = {
       thumbnail: product.media?.thumbnail || '',
       gallery: product.media?.gallery || [],
     };
+
     if (files.thumbnail?.length) {
       const res = await this.cloudinaryService.uploadBuffer(
         files.thumbnail[0],
         `thumb_${product.shortId}_${Date.now()}`,
       );
-      mediaUpdate.thumbnail = res.secure_url;
+      media.thumbnail = res.secure_url;
     }
     if (files.gallery?.length) {
       const promises = files.gallery.map((f, i) =>
@@ -66,17 +66,17 @@ export class ProductsService {
         ),
       );
       const results = await Promise.all(promises);
-      mediaUpdate.gallery.push(...results.map((r) => r.secure_url));
+      media.gallery.push(...results.map((r) => r.secure_url));
     }
     return await this.prodModel.findByIdAndUpdate(
       id,
-      { $set: { media: mediaUpdate } },
+      { $set: { media } },
       { new: true },
     );
   }
 
   async updateMediaOrder(id: string, dto: UpdateMediaOrderDto) {
-    const updated = await this.prodModel.findByIdAndUpdate(
+    return await this.prodModel.findByIdAndUpdate(
       id,
       {
         $set: {
@@ -86,8 +86,6 @@ export class ProductsService {
       },
       { new: true },
     );
-    if (!updated) throw new NotFoundException('Product not found');
-    return updated;
   }
 
   async create(dto: CreateProductDto): Promise<Product> {
@@ -108,7 +106,7 @@ export class ProductsService {
 
   async findAllRaw(page = 1, limit = 20) {
     const skip = (page - 1) * limit;
-    const [totalItems, data] = await Promise.all([
+    const [total, data] = await Promise.all([
       this.prodModel.countDocuments(),
       this.prodModel
         .find()
@@ -117,14 +115,7 @@ export class ProductsService {
         .limit(limit)
         .exec(),
     ]);
-    return {
-      data,
-      meta: {
-        totalItems,
-        totalPages: Math.ceil(totalItems / limit),
-        currentPage: page,
-      },
-    };
+    return { data, meta: { totalItems: total, currentPage: page } };
   }
 
   async getMenuCards(lang: string, page = 1, limit = 10, category?: string) {
@@ -143,17 +134,16 @@ export class ProductsService {
       .limit(limit)
       .lean()
       .exec()) as unknown as ProductCardProjection[];
-    const totalItems = await this.prodModel.countDocuments(query);
+    const total = await this.prodModel.countDocuments(query);
     return {
       data: items.map((i) => this.transformToCard(i, lang)),
-      meta: { totalItems, currentPage: page },
+      meta: { totalItems: total, currentPage: page },
     };
   }
 
   async searchProducts(lang: string, dto: SearchQueryDto) {
-    const p = dto.page || 1;
-    const l = dto.limit || 10;
-    const skip = (p - 1) * l;
+    const page = dto.page || 1;
+    const limit = dto.limit || 10;
     const regex = { $regex: dto.q, $options: 'i' };
     const filter = {
       'logistics.isAvailable': true,
@@ -161,6 +151,12 @@ export class ProductsService {
       $or: [
         { 'title.en': regex },
         { 'title.bn': regex },
+        { 'title.hi': regex },
+        { 'title.es': regex },
+        { 'description.en': regex },
+        { 'description.bn': regex },
+        { 'ingredients.en': regex },
+        { 'ingredients.bn': regex },
         { tags: { $in: [new RegExp(dto.q, 'i')] } },
         { shortId: regex },
       ],
@@ -171,14 +167,14 @@ export class ProductsService {
         'shortId category tags title logistics.grandTotal logistics.uKey media.thumbnail',
       )
       .sort({ position: 1 })
-      .skip(skip)
-      .limit(l)
+      .skip((page - 1) * limit)
+      .limit(limit)
       .lean()
       .exec()) as unknown as ProductCardProjection[];
-    const totalItems = await this.prodModel.countDocuments(filter);
+    const total = await this.prodModel.countDocuments(filter);
     return {
       data: items.map((i) => this.transformToCard(i, lang)),
-      meta: { totalItems, currentPage: p },
+      meta: { totalItems: total, currentPage: page },
     };
   }
 
@@ -187,27 +183,16 @@ export class ProductsService {
       .aggregate([
         {
           $facet: {
-            totalCount: [{ $count: 'count' }],
-            byCategory: [
-              { $group: { _id: '$category', count: { $sum: 1 } } },
-              { $sort: { count: -1 } },
-            ],
-            availableCount: [
-              { $match: { 'logistics.isAvailable': true } },
-              { $count: 'count' },
-            ],
+            total: [{ $count: 'c' }],
+            cat: [{ $group: { _id: '$category', c: { $sum: 1 } } }],
           },
         },
       ])
       .exec();
-    const result = stats[0] as unknown as StatsAggregationResult;
+    const result = stats[0] as StatsAggregationResult;
     return {
-      total: result.totalCount[0]?.count || 0,
-      available: result.availableCount[0]?.count || 0,
-      breakdown: result.byCategory.map((i) => ({
-        category: i._id,
-        count: i.count,
-      })),
+      total: result.total[0]?.c || 0,
+      breakdown: result.cat,
       timestamp: new Date().toISOString(),
     };
   }
@@ -235,6 +220,7 @@ export class ProductsService {
     const t_unit = unitMap[lang] || unitMap['en'];
     return {
       shortId: item.shortId,
+      category: item.category,
       title: item.title[lang] || item.title['en'] || '',
       price: item.logistics.grandTotal,
       unit: item.logistics.uKey === 'c' ? t_unit.c : t_unit.g,
@@ -248,12 +234,15 @@ export class ProductsService {
       bn: { c: 'কাপ', g: 'গ্লাস' },
     };
     const t_unit = unitMap[lang] || unitMap['en'];
+    const title = item.title,
+      desc = item.description;
     return {
       shortId: item.shortId,
-      title: item.title[lang] || item.title['en'] || '',
-      description: item.description[lang] || item.description['en'] || '',
-      media: item.media,
+      title: title[lang] || title['en'] || '',
+      description: desc[lang] || desc['en'] || '',
+      price: item.logistics.grandTotal,
       unit: item.logistics.uKey === 'c' ? t_unit.c : t_unit.g,
+      media: item.media,
     };
   }
 }
