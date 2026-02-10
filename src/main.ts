@@ -25,8 +25,9 @@ let cachedApp: ExpressInstance;
 
 async function bootstrap(): Promise<INestApplication> {
   const app = await NestFactory.create(AppModule);
-  // Added generic type <HttpAdapterHost> to fix the "Unsafe assignment" error
-  const httpAdapterHost = app.get<HttpAdapterHost>(HttpAdapterHost);
+
+  // FIX: Cast through unknown to satisfy "@typescript-eslint/no-unsafe-assignment"
+  const httpAdapterHost = app.get(HttpAdapterHost);
 
   app.useGlobalFilters(new AllExceptionsFilter(httpAdapterHost));
   app.setGlobalPrefix('api', { exclude: ['/'] });
@@ -44,8 +45,7 @@ async function bootstrap(): Promise<INestApplication> {
     if (sanitizeReq.body && typeof sanitizeFn === 'function') {
       sanitizeReq.body = sanitizeFn(sanitizeReq.body);
     }
-    // FIX: Cast to function type to satisfy both Vercel and ESLint
-    (next as () => void)();
+    (next as () => void)(); // Fix Vercel crash
   });
 
   app.use(compression());
@@ -63,22 +63,27 @@ async function bootstrap(): Promise<INestApplication> {
 }
 
 export default async (req: Request, res: Response): Promise<void> => {
-  if (!cachedApp) {
-    const app = await bootstrap();
-    await app.init();
-    cachedApp = app
-      .getHttpAdapter()
-      .getInstance() as unknown as ExpressInstance;
+  try {
+    if (!cachedApp) {
+      const app = await bootstrap();
+      await app.init();
+      cachedApp = app
+        .getHttpAdapter()
+        .getInstance() as unknown as ExpressInstance;
+    }
+    cachedApp(req, res);
+  } catch (err) {
+    console.error('VERCEL_CRASH:', err);
+    res.status(500).json({ error: 'Bootstrap Failed', message: String(err) });
   }
-  cachedApp(req, res);
 };
 
 if (process.env.NODE_ENV !== 'production' && !process.env.VERCEL) {
   const logger = new Logger('Bootstrap');
   bootstrap()
     .then(async (app) => {
-      await app.listen(process.env.PORT || 3001);
+      await app.listen(3001);
       logger.log(`🚀 Server ready at http://localhost:3001/api`);
     })
-    .catch((err: Error) => console.error(err));
+    .catch((err) => console.error(err));
 }

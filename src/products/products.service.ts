@@ -128,7 +128,9 @@ export class ProductsService {
   }
 
   async searchProducts(lang: string, dto: SearchQueryDto) {
-    const skip = (dto.page || 1 - 1) * (dto.limit || 10);
+    const page = dto.page || 1;
+    const limit = dto.limit || 10;
+    const skip = (page - 1) * limit;
     const regex = { $regex: dto.q, $options: 'i' };
     const filter = {
       'logistics.isAvailable': true,
@@ -153,13 +155,13 @@ export class ProductsService {
       )
       .sort({ position: 1 })
       .skip(skip)
-      .limit(dto.limit || 10)
+      .limit(limit)
       .lean()
       .exec()) as unknown as ProductCardProjection[];
     const totalItems = await this.prodModel.countDocuments(filter);
     return {
       data: items.map((i) => this.transformToCard(i, lang)),
-      meta: { totalItems, currentPage: dto.page || 1 },
+      meta: { totalItems, currentPage: page },
     };
   }
 
