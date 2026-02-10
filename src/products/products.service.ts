@@ -151,7 +151,9 @@ export class ProductsService {
   }
 
   async searchProducts(lang: string, dto: SearchQueryDto) {
-    const skip = ((dto.page || 1) - 1) * (dto.limit || 10);
+    const p = dto.page || 1;
+    const l = dto.limit || 10;
+    const skip = (p - 1) * l;
     const regex = { $regex: dto.q, $options: 'i' };
     const filter = {
       'logistics.isAvailable': true,
@@ -159,12 +161,6 @@ export class ProductsService {
       $or: [
         { 'title.en': regex },
         { 'title.bn': regex },
-        { 'title.hi': regex },
-        { 'title.es': regex },
-        { 'description.en': regex },
-        { 'description.bn': regex },
-        { 'ingredients.en': regex },
-        { 'ingredients.bn': regex },
         { tags: { $in: [new RegExp(dto.q, 'i')] } },
         { shortId: regex },
       ],
@@ -176,13 +172,13 @@ export class ProductsService {
       )
       .sort({ position: 1 })
       .skip(skip)
-      .limit(dto.limit || 10)
+      .limit(l)
       .lean()
       .exec()) as unknown as ProductCardProjection[];
     const totalItems = await this.prodModel.countDocuments(filter);
     return {
       data: items.map((i) => this.transformToCard(i, lang)),
-      meta: { totalItems, currentPage: dto.page || 1 },
+      meta: { totalItems, currentPage: p },
     };
   }
 
@@ -239,7 +235,6 @@ export class ProductsService {
     const t_unit = unitMap[lang] || unitMap['en'];
     return {
       shortId: item.shortId,
-      category: item.category,
       title: item.title[lang] || item.title['en'] || '',
       price: item.logistics.grandTotal,
       unit: item.logistics.uKey === 'c' ? t_unit.c : t_unit.g,
@@ -253,15 +248,12 @@ export class ProductsService {
       bn: { c: 'কাপ', g: 'গ্লাস' },
     };
     const t_unit = unitMap[lang] || unitMap['en'];
-    const title = item.title,
-      desc = item.description;
     return {
       shortId: item.shortId,
-      title: title[lang] || title['en'] || '',
-      description: desc[lang] || desc['en'] || '',
-      price: item.logistics.grandTotal,
-      unit: item.logistics.uKey === 'c' ? t_unit.c : t_unit.g,
+      title: item.title[lang] || item.title['en'] || '',
+      description: item.description[lang] || item.description['en'] || '',
       media: item.media,
+      unit: item.logistics.uKey === 'c' ? t_unit.c : t_unit.g,
     };
   }
 }

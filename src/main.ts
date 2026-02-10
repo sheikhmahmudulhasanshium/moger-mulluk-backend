@@ -1,5 +1,5 @@
 import { NestFactory, HttpAdapterHost } from '@nestjs/core';
-import { ValidationPipe, INestApplication } from '@nestjs/common';
+import { ValidationPipe, Logger, INestApplication } from '@nestjs/common';
 import { AppModule } from './app.module';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import { AllExceptionsFilter } from './all-exceptions.filter';
@@ -9,6 +9,9 @@ import * as mongoSanitize from 'mongo-sanitize';
 import { Request, Response, NextFunction } from 'express';
 
 type SanitizeFn = <T>(data: T) => T;
+interface MongoSanitizeModule {
+  default: SanitizeFn;
+}
 interface SanitizeRequest extends Request {
   body: Record<string, unknown>;
 }
@@ -22,8 +25,7 @@ let cachedApp: ExpressInstance;
 
 async function bootstrap(): Promise<INestApplication> {
   const app = await NestFactory.create(AppModule);
-
-  // FIX: Cast through unknown to satisfy "@typescript-eslint/no-unsafe-assignment"
+  // FIX: Cast through unknown to satisfy Lint "Unsafe Assignment"
   const httpAdapterHost = app.get(HttpAdapterHost);
 
   app.useGlobalFilters(new AllExceptionsFilter(httpAdapterHost));
@@ -32,14 +34,17 @@ async function bootstrap(): Promise<INestApplication> {
     helmet({ contentSecurityPolicy: false, crossOriginEmbedderPolicy: false }),
   );
 
-  // FIX: Type-safe extraction of sanitize function
-  const sanitize = mongoSanitize as unknown as SanitizeFn;
+  const sanitizeFn =
+    typeof mongoSanitize === 'function'
+      ? (mongoSanitize as unknown as SanitizeFn)
+      : (mongoSanitize as unknown as MongoSanitizeModule).default;
 
   app.use((req: Request, _res: Response, next: NextFunction) => {
     const sanitizeReq = req as unknown as SanitizeRequest;
-    if (sanitizeReq.body && typeof sanitize === 'function') {
-      sanitizeReq.body = sanitize(sanitizeReq.body);
+    if (sanitizeReq.body && typeof sanitizeFn === 'function') {
+      sanitizeReq.body = sanitizeFn(sanitizeReq.body);
     }
+    // FIX: Cast to function to satisfy Vercel
     (next as () => void)();
   });
 
@@ -69,7 +74,7 @@ export default async (req: Request, res: Response): Promise<void> => {
     cachedApp(req, res);
   } catch (err: unknown) {
     console.error('VERCEL_CRASH:', err);
-    // Use native Node.js methods to satisfy TS Compiler and ESLint "unsafe" rules
+    // FIX: Use native Node.js methods to bypass "status does not exist" build error
     res.statusCode = 500;
     res.setHeader('Content-Type', 'application/json');
     res.end(
@@ -82,9 +87,11 @@ export default async (req: Request, res: Response): Promise<void> => {
 };
 
 if (process.env.NODE_ENV !== 'production' && !process.env.VERCEL) {
+  const logger = new Logger('Bootstrap');
   bootstrap()
     .then(async (app) => {
       await app.listen(3001);
+      logger.log(`🚀 Server ready at http://localhost:3001/api`);
     })
     .catch((err) => console.error(err));
 }
