@@ -7,17 +7,62 @@ import {
   Param,
   Delete,
   Query,
+  UseInterceptors,
+  UploadedFiles,
+  BadRequestException,
 } from '@nestjs/common';
+import { FileFieldsInterceptor } from '@nestjs/platform-express';
 import { ProductsService } from './products.service';
 import { CreateProductDto } from './dto/create-product.dto';
 import { UpdateProductDto } from './dto/update-product.dto';
 import { SearchQueryDto } from './dto/search-query.dto';
-import { ApiTags, ApiOperation } from '@nestjs/swagger';
+import { ApiTags, ApiOperation, ApiConsumes, ApiBody } from '@nestjs/swagger';
+import { UpdateMediaOrderDto } from './dto/update-media-order.dto';
 
 @ApiTags('Products')
 @Controller('products')
 export class ProductsController {
   constructor(private readonly productsService: ProductsService) {}
+
+  @Patch(':id/media')
+  @ApiOperation({ summary: 'Admin: Upload product images' })
+  @ApiConsumes('multipart/form-data')
+  @ApiBody({
+    schema: {
+      type: 'object',
+      properties: {
+        thumbnail: {
+          type: 'string',
+          format: 'binary',
+          description: 'One image file',
+        },
+        gallery: {
+          type: 'array',
+          items: { type: 'string', format: 'binary' },
+          description: 'Multiple image files',
+        },
+      },
+    },
+  })
+  @UseInterceptors(
+    FileFieldsInterceptor([
+      { name: 'thumbnail', maxCount: 1 },
+      { name: 'gallery', maxCount: 10 },
+    ]),
+  )
+  async uploadMedia(
+    @Param('id') id: string,
+    @UploadedFiles()
+    files: {
+      thumbnail?: Express.Multer.File[];
+      gallery?: Express.Multer.File[];
+    },
+  ) {
+    if (!files || (!files.thumbnail && !files.gallery)) {
+      throw new BadRequestException('No files provided in the request');
+    }
+    return this.productsService.uploadProductMedia(id, files);
+  }
 
   @Post()
   @ApiOperation({ summary: 'Admin: Create product' })
@@ -26,19 +71,17 @@ export class ProductsController {
   }
 
   @Get('stats/count')
-  @ApiOperation({ summary: 'System: Get counts and breakdown' })
+  @ApiOperation({ summary: 'System: Get counts' })
   getProductCount() {
     return this.productsService.getProductStats();
   }
 
   @Get('search/:lang')
-  @ApiOperation({ summary: 'Public: Search by keywords (q and lang required)' })
   search(@Param('lang') lang: string, @Query() query: SearchQueryDto) {
     return this.productsService.searchProducts(lang, query);
   }
 
   @Get('menu/:lang')
-  @ApiOperation({ summary: 'Public: Get card view menu' })
   getMenu(
     @Param('lang') lang: string,
     @Query('page') page?: string,
@@ -54,13 +97,11 @@ export class ProductsController {
   }
 
   @Get('detail/:lang/:shortId')
-  @ApiOperation({ summary: 'Public: Get full product details' })
   getDetail(@Param('lang') lang: string, @Param('shortId') shortId: string) {
     return this.productsService.getProductDetail(shortId, lang);
   }
 
   @Get('admin/raw')
-  @ApiOperation({ summary: 'Admin: Get all raw documents' })
   findAllRaw(@Query('page') page?: string, @Query('limit') limit?: string) {
     return this.productsService.findAllRaw(
       page ? parseInt(page) : 1,
@@ -69,14 +110,21 @@ export class ProductsController {
   }
 
   @Patch(':id')
-  @ApiOperation({ summary: 'Admin: Update product' })
   update(@Param('id') id: string, @Body() updateProductDto: UpdateProductDto) {
     return this.productsService.update(id, updateProductDto);
   }
 
   @Delete(':id')
-  @ApiOperation({ summary: 'Admin: Delete product' })
   remove(@Param('id') id: string) {
     return this.productsService.remove(id);
+  } // Add UpdateMediaOrderDto to imports
+  // Inside ProductsController class
+  @Patch(':id/media/reorder')
+  @ApiOperation({ summary: 'Admin: Reorder gallery or swap thumbnail' })
+  async updateMediaOrder(
+    @Param('id') id: string,
+    @Body() updateMediaOrderDto: UpdateMediaOrderDto,
+  ) {
+    return this.productsService.updateMediaOrder(id, updateMediaOrderDto);
   }
 }

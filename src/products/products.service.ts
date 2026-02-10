@@ -10,8 +10,9 @@ import { Product } from './schemas/product.schema';
 import { CreateProductDto } from './dto/create-product.dto';
 import { UpdateProductDto } from './dto/update-product.dto';
 import { SearchQueryDto } from './dto/search-query.dto';
+import { CloudinaryService } from '@/common/cloudinary/cloudinary.service';
+import { UpdateMediaOrderDto } from './dto/update-media-order.dto';
 
-// 1. Interface for lightweight card data
 interface ProductCardProjection {
   shortId: string;
   category: string;
@@ -21,14 +22,12 @@ interface ProductCardProjection {
   media?: { thumbnail: string };
 }
 
-// 2. Interface for MongoDB Aggregation Result (Stats)
 interface StatsAggregationResult {
   totalCount: { count: number }[];
   byCategory: { _id: string; count: number }[];
   availableCount: { count: number }[];
 }
 
-// 3. Interface for Unit Translations
 interface UnitSet {
   c: string;
   g: string;
@@ -38,17 +37,66 @@ interface UnitSet {
 export class ProductsService {
   constructor(
     @InjectModel(Product.name, 'products') private prodModel: Model<Product>,
+    private cloudinaryService: CloudinaryService, // New Injection
   ) {}
 
-  async create(dto: CreateProductDto): Promise<Product> {
-    if (!dto.title?.en) {
-      throw new BadRequestException('English (en) Title is required');
+  // --- NEW MEDIA UPLOAD METHOD ---
+  async uploadProductMedia(
+    id: string,
+    files: {
+      thumbnail?: Express.Multer.File[];
+      gallery?: Express.Multer.File[];
+    },
+  ) {
+    if (!files) {
+      throw new BadRequestException(
+        'No files were uploaded. Make sure to use multipart/form-data',
+      );
     }
 
+    const product = await this.prodModel.findById(id);
+    if (!product) throw new NotFoundException('Product not found');
+
+    const mediaUpdate = {
+      thumbnail: product.media?.thumbnail || '',
+      gallery: product.media?.gallery || [],
+    };
+
+    // 1. Upload Thumbnail (Replace existing)
+    if (files.thumbnail?.length) {
+      const file = files.thumbnail[0];
+      const publicId = `thumb_${product.shortId}_${Date.now()}`;
+      const result = await this.cloudinaryService.uploadBuffer(file, publicId);
+      mediaUpdate.thumbnail = result.secure_url;
+    }
+
+    // 2. Upload Gallery Images (Append to existing)
+    if (files.gallery?.length) {
+      const uploadPromises = files.gallery.map((file, index) => {
+        const publicId = `gal_${product.shortId}_${Date.now()}_${index}`;
+        return this.cloudinaryService.uploadBuffer(file, publicId);
+      });
+
+      const results = await Promise.all(uploadPromises);
+      const urls = results.map((r) => r.secure_url);
+      mediaUpdate.gallery.push(...urls);
+    }
+
+    // 3. Save to Database
+    return await this.prodModel.findByIdAndUpdate(
+      id,
+      { $set: { media: mediaUpdate } },
+      { new: true },
+    );
+  }
+
+  // --- EXISTING METHODS (UNCHANGED) ---
+  async create(dto: CreateProductDto): Promise<Product> {
+    if (!dto.title?.en)
+      throw new BadRequestException('English (en) Title is required');
     const slug = slugify(dto.title.en, { lower: true, strict: true });
     const paddedPos = String(dto.position).padStart(2, '0');
     const generatedShortId = `${dto.category}--${paddedPos}--${slug}`;
-
     const created = new this.prodModel({
       ...dto,
       shortId: dto.shortId || generatedShortId,
@@ -56,17 +104,14 @@ export class ProductsService {
     return await created.save();
   }
 
-  // --- PUBLIC METHODS ---
-
   async getMenuCards(lang: string, page = 1, limit = 10, category?: string) {
     const skip = (page - 1) * limit;
-    const query: Record<string, unknown> = {
+    const query = {
       'logistics.isAvailable': true,
       ...(category ? { category } : {}),
     };
-
     const items = (await this.prodModel
-      .find(query as unknown as Record<string, unknown>)
+      .find(query)
       .select(
         'shortId category tags title logistics.grandTotal logistics.uKey media.thumbnail',
       )
@@ -75,11 +120,7 @@ export class ProductsService {
       .limit(limit)
       .lean()
       .exec()) as unknown as ProductCardProjection[];
-
-    const totalItems = await this.prodModel.countDocuments(
-      query as unknown as Record<string, unknown>,
-    );
-
+    const totalItems = await this.prodModel.countDocuments(query);
     return {
       data: items.map((item) => this.transformToCard(item, lang)),
       meta: {
@@ -94,8 +135,7 @@ export class ProductsService {
     const { q, cat, page = 1, limit = 10 } = queryDto;
     const skip = (page - 1) * limit;
     const regex = { $regex: q, $options: 'i' };
-
-    const filter: Record<string, unknown> = {
+    const filter = {
       'logistics.isAvailable': true,
       ...(cat ? { category: cat } : {}),
       $or: [
@@ -111,9 +151,8 @@ export class ProductsService {
         { shortId: regex },
       ],
     };
-
     const items = (await this.prodModel
-      .find(filter as unknown as Record<string, unknown>)
+      .find(filter)
       .select(
         'shortId category tags title logistics.grandTotal logistics.uKey media.thumbnail',
       )
@@ -122,11 +161,7 @@ export class ProductsService {
       .limit(limit)
       .lean()
       .exec()) as unknown as ProductCardProjection[];
-
-    const totalItems = await this.prodModel.countDocuments(
-      filter as unknown as Record<string, unknown>,
-    );
-
+    const totalItems = await this.prodModel.countDocuments(filter);
     return {
       data: items.map((item) => this.transformToCard(item, lang)),
       meta: {
@@ -142,8 +177,6 @@ export class ProductsService {
     if (!item) throw new NotFoundException('Product not found');
     return this.transformToDetail(item, lang);
   }
-
-  // --- ADMIN & STATS ---
 
   async findAllRaw(page = 1, limit = 20) {
     const skip = (page - 1) * limit;
@@ -165,7 +198,25 @@ export class ProductsService {
       },
     };
   }
+  // Inside ProductsService class
+  async updateMediaOrder(id: string, dto: UpdateMediaOrderDto) {
+    const product = await this.prodModel.findById(id);
+    if (!product) throw new NotFoundException('Product not found');
 
+    // We update the media object with the new strings provided by the frontend
+    const updated = await this.prodModel.findByIdAndUpdate(
+      id,
+      {
+        $set: {
+          'media.thumbnail': dto.thumbnail,
+          'media.gallery': dto.gallery,
+        },
+      },
+      { new: true },
+    );
+
+    return updated;
+  }
   async getProductStats() {
     const stats = await this.prodModel
       .aggregate([
@@ -184,10 +235,7 @@ export class ProductsService {
         },
       ])
       .exec();
-
-    // FIX: Double cast to handle MongoDB aggregation results safely
     const result = stats[0] as unknown as StatsAggregationResult;
-
     return {
       total: result.totalCount[0]?.count || 0,
       available: result.availableCount[0]?.count || 0,
@@ -213,23 +261,17 @@ export class ProductsService {
     return { deleted: true };
   }
 
-  // --- HELPERS ---
-
   private transformToCard(item: ProductCardProjection, lang: string) {
     const unitMap: Record<string, UnitSet> = {
       en: { c: 'Cup', g: 'Glass' },
       bn: { c: 'কাপ', g: 'গ্লাস' },
     };
-
-    // Type-safe unit selection
-    const t_unit = unitMap[lang] || unitMap['en'] || { c: 'Unit', g: 'Unit' };
-    const title = item.title;
-
+    const t_unit = unitMap[lang] || unitMap['en'];
     return {
       shortId: item.shortId,
       category: item.category,
       tags: item.tags,
-      title: title[lang] || title['en'] || '',
+      title: item.title[lang] || item.title['en'] || '',
       price: item.logistics.grandTotal,
       unit: item.logistics.uKey === 'c' ? t_unit.c : t_unit.g,
       thumbnail: item.media?.thumbnail || '',
@@ -241,16 +283,13 @@ export class ProductsService {
       en: { c: 'Cup', g: 'Glass' },
       bn: { c: 'কাপ', g: 'গ্লাস' },
     };
-    const t_unit = unitMap[lang] || unitMap['en'] || { c: 'Unit', g: 'Unit' };
-
-    // Explicit casting to Record for indexing safety
-    const title = item.title;
-    const desc = item.description;
-    const ing = item.ingredients || {};
-    const ben = item.healthBenefit || {};
-    const ori = item.origin || {};
-    const fac = item.funFact || {};
-
+    const t_unit = unitMap[lang] || unitMap['en'];
+    const title = item.title,
+      desc = item.description,
+      ing = item.ingredients || {},
+      ben = item.healthBenefit || {},
+      ori = item.origin || {},
+      fac = item.funFact || {};
     return {
       shortId: item.shortId,
       category: item.category,
