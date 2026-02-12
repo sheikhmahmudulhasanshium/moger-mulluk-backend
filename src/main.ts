@@ -1,5 +1,5 @@
 import { NestFactory, HttpAdapterHost } from '@nestjs/core';
-import { ValidationPipe, Logger, INestApplication } from '@nestjs/common';
+import { ValidationPipe, Logger } from '@nestjs/common';
 import { AppModule } from './app.module';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import { AllExceptionsFilter } from './all-exceptions.filter';
@@ -7,14 +7,10 @@ import helmet from 'helmet';
 import compression from 'compression';
 import * as mongoSanitize from 'mongo-sanitize';
 import { Request, Response, NextFunction } from 'express';
+import { join } from 'path'; // 1. Import join
+import { NestExpressApplication } from '@nestjs/platform-express'; // 2. Import this
 
-type SanitizeFn = <T>(data: T) => T;
-interface MongoSanitizeModule {
-  default: SanitizeFn;
-}
-interface SanitizeRequest extends Request {
-  body: Record<string, unknown>;
-}
+type SanitizeFn = (data: unknown) => unknown;
 type ExpressInstance = (
   req: Request,
   res: Response,
@@ -23,30 +19,29 @@ type ExpressInstance = (
 
 let cachedApp: ExpressInstance;
 
-async function bootstrap(): Promise<INestApplication> {
-  const app = await NestFactory.create(AppModule);
+async function bootstrap(): Promise<NestExpressApplication> {
+  // 3. Add <NestExpressApplication> here
+  const app = await NestFactory.create<NestExpressApplication>(AppModule);
 
-  // FIX: Added <HttpAdapterHost> to resolve "@typescript-eslint/no-unsafe-assignment"
-  const httpAdapterHost = app.get<HttpAdapterHost>(HttpAdapterHost);
+  // 4. Tell Nest to serve the public folder
+  // This allows the browser to find /logo.svg, /favicon.ico, etc.
+  app.useStaticAssets(join(process.cwd(), 'public'));
 
+  const httpAdapterHost = app.get(HttpAdapterHost);
   app.useGlobalFilters(new AllExceptionsFilter(httpAdapterHost));
+
   app.setGlobalPrefix('api', { exclude: ['/'] });
+
   app.use(
     helmet({ contentSecurityPolicy: false, crossOriginEmbedderPolicy: false }),
   );
 
-  const sanitizeFn =
-    typeof mongoSanitize === 'function'
-      ? (mongoSanitize as unknown as SanitizeFn)
-      : (mongoSanitize as unknown as MongoSanitizeModule).default;
-
   app.use((req: Request, _res: Response, next: NextFunction) => {
-    const sanitizeReq = req as unknown as SanitizeRequest;
-    if (sanitizeReq.body && typeof sanitizeFn === 'function') {
-      sanitizeReq.body = sanitizeFn(sanitizeReq.body);
+    if (req.body && typeof req.body === 'object') {
+      const sanitize = mongoSanitize as SanitizeFn;
+      req.body = sanitize(req.body) as Record<string, unknown>;
     }
-    // FIX: Cast as function to satisfy Vercel
-    (next as () => void)();
+    next();
   });
 
   app.use(compression());
@@ -77,14 +72,12 @@ export default async (req: Request, res: Response): Promise<void> => {
     if (!cachedApp) {
       const app = await bootstrap();
       await app.init();
-      cachedApp = app
-        .getHttpAdapter()
-        .getInstance() as unknown as ExpressInstance;
+      const instance = app.getHttpAdapter().getInstance() as unknown;
+      cachedApp = instance as ExpressInstance;
     }
     cachedApp(req, res);
   } catch (err: unknown) {
     console.error('VERCEL_CRASH:', err);
-    // FIX: Use native Node.js methods to satisfy TS Compiler and ESLint "unsafe" rules
     res.statusCode = 500;
     res.setHeader('Content-Type', 'application/json');
     res.end(

@@ -6,7 +6,7 @@
       "destination": "src/main.ts"
     },
     {
-      "source": "/(.*)",
+      "source": "/((?!.*\\.(?:js|css|png|jpg|svg|ico|json)$).*)",
       "destination": "src/main.ts"
     }
   ]

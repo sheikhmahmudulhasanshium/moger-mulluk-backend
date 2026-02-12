@@ -20,16 +20,6 @@ export class AllExceptionsFilter implements ExceptionFilter {
     const response = ctx.getResponse<Response>();
     const url = httpAdapter.getRequestUrl(ctx.getRequest<Request>()) as string;
 
-    if (url.endsWith('.css')) {
-      httpAdapter.setHeader(response, 'Content-Type', 'text/css');
-      httpAdapter.reply(
-        response,
-        '/* Asset Not Found */',
-        HttpStatus.NOT_FOUND as number,
-      );
-      return;
-    }
-
     const status: number =
       exception instanceof HttpException
         ? exception.getStatus()

@@ -50,7 +50,6 @@ export class ProductsService {
       thumbnail: product.media?.thumbnail || '',
       gallery: product.media?.gallery || [],
     };
-
     if (files.thumbnail?.length) {
       const res = await this.cloudinaryService.uploadBuffer(
         files.thumbnail[0],
@@ -99,11 +98,8 @@ export class ProductsService {
   }
 
   async findOne(id: string) {
-    const item = await this.prodModel.findById(id).exec();
-    if (!item) throw new NotFoundException('Product not found');
-    return item;
+    return await this.prodModel.findById(id).exec();
   }
-
   async findAllRaw(page = 1, limit = 20) {
     const skip = (page - 1) * limit;
     const [total, data] = await Promise.all([
@@ -142,8 +138,8 @@ export class ProductsService {
   }
 
   async searchProducts(lang: string, dto: SearchQueryDto) {
-    const page = dto.page || 1;
-    const limit = dto.limit || 10;
+    const p = dto.page || 1;
+    const l = dto.limit || 10;
     const regex = { $regex: dto.q, $options: 'i' };
     const filter = {
       'logistics.isAvailable': true,
@@ -153,10 +149,6 @@ export class ProductsService {
         { 'title.bn': regex },
         { 'title.hi': regex },
         { 'title.es': regex },
-        { 'description.en': regex },
-        { 'description.bn': regex },
-        { 'ingredients.en': regex },
-        { 'ingredients.bn': regex },
         { tags: { $in: [new RegExp(dto.q, 'i')] } },
         { shortId: regex },
       ],
@@ -167,14 +159,14 @@ export class ProductsService {
         'shortId category tags title logistics.grandTotal logistics.uKey media.thumbnail',
       )
       .sort({ position: 1 })
-      .skip((page - 1) * limit)
-      .limit(limit)
+      .skip((p - 1) * l)
+      .limit(l)
       .lean()
       .exec()) as unknown as ProductCardProjection[];
     const total = await this.prodModel.countDocuments(filter);
     return {
       data: items.map((i) => this.transformToCard(i, lang)),
-      meta: { totalItems: total, currentPage: page },
+      meta: { totalItems: total, currentPage: p },
     };
   }
 
