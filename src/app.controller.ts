@@ -19,7 +19,7 @@ export class AppController {
     res.end(html);
   }
 
-  @Get('api/status')
+  @Get('status')
   @ApiOperation({ summary: 'System Health Check' })
   getStatus() {
     return {
