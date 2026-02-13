@@ -10,7 +10,8 @@ import { Product } from './schemas/product.schema';
 import { CreateProductDto } from './dto/create-product.dto';
 import { UpdateProductDto } from './dto/update-product.dto';
 import { SearchQueryDto } from './dto/search-query.dto';
-import { CloudinaryService } from '@/common/cloudinary/cloudinary.service';
+import { MediaService } from '../media/media.service';
+import { MediaPurpose } from '../common/enums/media-purpose.enum';
 import { UpdateMediaOrderDto } from './dto/update-media-order.dto';
 
 interface ProductCardProjection {
@@ -34,7 +35,7 @@ interface UnitSet {
 export class ProductsService {
   constructor(
     @InjectModel(Product.name, 'products') private prodModel: Model<Product>,
-    private cloudinaryService: CloudinaryService,
+    private mediaService: MediaService, // Changed from CloudinaryService to MediaService
   ) {}
 
   async uploadProductMedia(
@@ -46,27 +47,32 @@ export class ProductsService {
   ) {
     const product = await this.prodModel.findById(id);
     if (!product) throw new NotFoundException('Product not found');
+
     const media = {
       thumbnail: product.media?.thumbnail || '',
       gallery: product.media?.gallery || [],
     };
+
+    // Use MediaService.uploadFile to ensure record is saved in 'metadata' DB
     if (files.thumbnail?.length) {
-      const res = await this.cloudinaryService.uploadBuffer(
+      const savedMedia = await this.mediaService.uploadFile(
         files.thumbnail[0],
-        `thumb_${product.shortId}_${Date.now()}`,
+        MediaPurpose.PRODUCT, // Using correct enum key
+        id, //pass the Product ID as refId
       );
-      media.thumbnail = res.secure_url;
+      media.thumbnail = savedMedia.url;
     }
+
     if (files.gallery?.length) {
-      const promises = files.gallery.map((f, i) =>
-        this.cloudinaryService.uploadBuffer(
-          f,
-          `gal_${product.shortId}_${Date.now()}_${i}`,
-        ),
+      // Process all gallery uploads and save them to Media DB
+      const promises = files.gallery.map(
+        (f) => this.mediaService.uploadFile(f, MediaPurpose.PRODUCT),
+        id, //pass the Product ID as refId
       );
       const results = await Promise.all(promises);
-      media.gallery.push(...results.map((r) => r.secure_url));
+      media.gallery.push(...results.map((r) => r.url));
     }
+
     return await this.prodModel.findByIdAndUpdate(
       id,
       { $set: { media } },

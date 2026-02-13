@@ -125,4 +125,13 @@ export class MediaController {
   async delete(@Param('id') id: string): Promise<Media | null> {
     return await this.mediaService.delete(id);
   }
+  // ... other imports
+  @Get('ref/:refId')
+  @ApiOperation({
+    summary:
+      'Get all media associated with a specific entity (Product/Employee ID)',
+  })
+  async getByRef(@Param('refId') refId: string): Promise<Media[]> {
+    return await this.mediaService.findByRefId(refId);
+  }
 }

@@ -37,6 +37,10 @@ export class Media extends Document {
     default: MediaPurpose.GENERAL,
   })
   purpose: MediaPurpose;
+
+  // New field to link to Product ID, Employee ID, etc.
+  @Prop({ index: true })
+  refId?: string;
 }
 
 export const MediaSchema = SchemaFactory.createForClass(Media);

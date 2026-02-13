@@ -15,5 +15,6 @@ import { CloudinaryModule } from '../common/cloudinary/cloudinary.module';
   ],
   controllers: [MediaController],
   providers: [MediaService],
+  exports: [MediaService], // <--- ADD THIS LINE
 })
 export class MediaModule {}
