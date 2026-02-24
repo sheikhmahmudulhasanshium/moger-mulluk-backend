@@ -194,7 +194,25 @@ export class ProductsService {
       timestamp: new Date().toISOString(),
     };
   }
+  // Add this method to ProductsService class
+  async linkProductMedia(id: string, url: string) {
+    const product = await this.prodModel.findById(id);
+    if (!product) throw new NotFoundException('Product not found');
 
+    // Use the MediaService to "upload" the remote link to Cloudinary and save metadata
+    const savedMedia = await this.mediaService.uploadRemote(
+      url,
+      MediaPurpose.PRODUCT,
+      `thumb-${product.shortId}`,
+      id, // refId
+    );
+
+    return await this.prodModel.findByIdAndUpdate(
+      id,
+      { $set: { 'media.thumbnail': savedMedia.url } },
+      { new: true },
+    );
+  }
   async getProductDetail(shortId: string, lang: string) {
     const item = await this.prodModel.findOne({ shortId }).exec();
     if (!item) throw new NotFoundException('Product not found');

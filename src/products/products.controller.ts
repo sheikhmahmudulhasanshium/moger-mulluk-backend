@@ -78,7 +78,12 @@ export class ProductsController {
   findOne(@Param('id') id: string) {
     return this.productsService.findOne(id);
   }
-
+  @Patch(':id/media-link')
+  @ApiOperation({ summary: 'Admin: Link an external image URL' })
+  async linkMedia(@Param('id') id: string, @Body('url') url: string) {
+    if (!url) throw new BadRequestException('URL is required');
+    return this.productsService.linkProductMedia(id, url);
+  }
   @Patch(':id/media')
   @ApiOperation({ summary: 'Admin: Upload images' })
   @ApiConsumes('multipart/form-data')
