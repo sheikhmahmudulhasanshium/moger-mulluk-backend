@@ -45,7 +45,13 @@ async function bootstrap(): Promise<NestExpressApplication> {
   });
 
   app.use(compression());
-  app.enableCors();
+  // main.ts
+  app.enableCors({
+    origin: ['https://moger-mulluk.vercel.app', 'http://localhost:3000'],
+    methods: 'GET,HEAD,PUT,PATCH,POST,DELETE,OPTIONS',
+    credentials: true,
+    allowedHeaders: ['Content-Type', 'Authorization', 'Accept'],
+  });
   app.useGlobalPipes(new ValidationPipe({ whitelist: true, transform: true }));
 
   const config = new DocumentBuilder()

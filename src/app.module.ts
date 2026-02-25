@@ -35,6 +35,8 @@ import { MediaModule } from './media/media.module';
       useFactory: (config: ConfigService) => ({
         uri: config.get<string>('MONGODB_URI'),
         dbName: 'products',
+        serverSelectionTimeoutMS: 5000, // Important for Vercel
+        maxPoolSize: 10, // Limit connections in serverless
       }),
       inject: [ConfigService],
     }),
