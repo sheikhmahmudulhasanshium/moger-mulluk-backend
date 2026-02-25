@@ -18,6 +18,7 @@ import { UpdateProductDto } from './dto/update-product.dto';
 import { SearchQueryDto } from './dto/search-query.dto';
 import { UpdateMediaOrderDto } from './dto/update-media-order.dto';
 import { ApiTags, ApiOperation, ApiConsumes, ApiBody } from '@nestjs/swagger';
+import { LinkMediaDto } from './dto/link-media.dto';
 
 @ApiTags('Products')
 @Controller('products')
@@ -78,12 +79,14 @@ export class ProductsController {
   findOne(@Param('id') id: string) {
     return this.productsService.findOne(id);
   }
+
   @Patch(':id/media-link')
   @ApiOperation({ summary: 'Admin: Link an external image URL' })
-  async linkMedia(@Param('id') id: string, @Body('url') url: string) {
-    if (!url) throw new BadRequestException('URL is required');
-    return this.productsService.linkProductMedia(id, url);
+  async linkMedia(@Param('id') id: string, @Body() dto: LinkMediaDto) {
+    // Fixed: Added closing parenthesis above, fixed productsService plural, and dto.url typo
+    return this.productsService.linkProductMedia(id, dto.url);
   }
+
   @Patch(':id/media')
   @ApiOperation({ summary: 'Admin: Upload images' })
   @ApiConsumes('multipart/form-data')
