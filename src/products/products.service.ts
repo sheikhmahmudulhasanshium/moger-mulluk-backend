@@ -31,6 +31,13 @@ interface UnitSet {
   g: string;
 }
 
+// Interface for the Gallery Aggregation Result
+export interface CategoryGallery {
+  _id: string;
+  thumbnails: string[];
+  count: number;
+}
+
 @Injectable()
 export class ProductsService {
   constructor(
@@ -194,6 +201,28 @@ export class ProductsService {
       timestamp: new Date().toISOString(),
     };
   }
+
+  async getProductGallery(): Promise<CategoryGallery[]> {
+    return await this.prodModel
+      .aggregate<CategoryGallery>([
+        {
+          $match: {
+            'media.thumbnail': { $exists: true, $ne: '' },
+            'logistics.isAvailable': true,
+          },
+        },
+        {
+          $group: {
+            _id: '$category',
+            thumbnails: { $push: '$media.thumbnail' },
+            count: { $sum: 1 },
+          },
+        },
+        { $sort: { _id: 1 } },
+      ])
+      .exec();
+  }
+
   // Add this method to ProductsService class
   async linkProductMedia(id: string, url: string) {
     const product = await this.prodModel.findById(id);

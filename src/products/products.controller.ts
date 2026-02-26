@@ -12,7 +12,7 @@ import {
   BadRequestException,
 } from '@nestjs/common';
 import { FileFieldsInterceptor } from '@nestjs/platform-express';
-import { ProductsService } from './products.service';
+import { ProductsService, CategoryGallery } from './products.service'; // Added CategoryGallery import
 import { CreateProductDto } from './dto/create-product.dto';
 import { UpdateProductDto } from './dto/update-product.dto';
 import { SearchQueryDto } from './dto/search-query.dto';
@@ -35,6 +35,14 @@ export class ProductsController {
   @ApiOperation({ summary: 'System: Get counts' })
   getProductCount() {
     return this.productsService.getProductStats();
+  }
+
+  @Get('gallery')
+  @ApiOperation({
+    summary: 'Public: Get thumbnails grouped by category for hero',
+  })
+  getProductGallery(): Promise<CategoryGallery[]> {
+    return this.productsService.getProductGallery();
   }
 
   @Get('admin/raw')
@@ -83,7 +91,6 @@ export class ProductsController {
   @Patch(':id/media-link')
   @ApiOperation({ summary: 'Admin: Link an external image URL' })
   async linkMedia(@Param('id') id: string, @Body() dto: LinkMediaDto) {
-    // Fixed: Added closing parenthesis above, fixed productsService plural, and dto.url typo
     return this.productsService.linkProductMedia(id, dto.url);
   }
 
