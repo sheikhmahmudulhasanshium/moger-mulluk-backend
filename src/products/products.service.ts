@@ -42,7 +42,7 @@ export interface CategoryGallery {
 export class ProductsService {
   constructor(
     @InjectModel(Product.name, 'products') private prodModel: Model<Product>,
-    private mediaService: MediaService, // Changed from CloudinaryService to MediaService
+    private mediaService: MediaService,
   ) {}
 
   async uploadProductMedia(
@@ -60,21 +60,18 @@ export class ProductsService {
       gallery: product.media?.gallery || [],
     };
 
-    // Use MediaService.uploadFile to ensure record is saved in 'metadata' DB
     if (files.thumbnail?.length) {
       const savedMedia = await this.mediaService.uploadFile(
         files.thumbnail[0],
-        MediaPurpose.PRODUCT, // Using correct enum key
-        id, //pass the Product ID as refId
+        MediaPurpose.PRODUCT,
+        id,
       );
       media.thumbnail = savedMedia.url;
     }
 
     if (files.gallery?.length) {
-      // Process all gallery uploads and save them to Media DB
-      const promises = files.gallery.map(
-        (f) => this.mediaService.uploadFile(f, MediaPurpose.PRODUCT),
-        id, //pass the Product ID as refId
+      const promises = files.gallery.map((f) =>
+        this.mediaService.uploadFile(f, MediaPurpose.PRODUCT, id),
       );
       const results = await Promise.all(promises);
       media.gallery.push(...results.map((r) => r.url));
@@ -113,6 +110,7 @@ export class ProductsService {
   async findOne(id: string) {
     return await this.prodModel.findById(id).exec();
   }
+
   async findAllRaw(page = 1, limit = 20) {
     const skip = (page - 1) * limit;
     const [total, data] = await Promise.all([
@@ -223,25 +221,29 @@ export class ProductsService {
       .exec();
   }
 
-  // Add this method to ProductsService class
   async linkProductMedia(id: string, url: string) {
     const product = await this.prodModel.findById(id);
     if (!product) throw new NotFoundException('Product not found');
 
-    // Use the MediaService to "upload" the remote link to Cloudinary and save metadata
     const savedMedia = await this.mediaService.uploadRemote(
       url,
       MediaPurpose.PRODUCT,
       `thumb-${product.shortId}`,
-      id, // refId
+      id,
     );
+
+    const media = {
+      thumbnail: savedMedia.url,
+      gallery: product.media?.gallery || [],
+    };
 
     return await this.prodModel.findByIdAndUpdate(
       id,
-      { $set: { 'media.thumbnail': savedMedia.url } },
+      { $set: { media } },
       { new: true },
     );
   }
+
   async getProductDetail(shortId: string, lang: string) {
     const item = await this.prodModel.findOne({ shortId }).exec();
     if (!item) throw new NotFoundException('Product not found');
@@ -253,6 +255,7 @@ export class ProductsService {
       .findByIdAndUpdate(id, dto, { new: true })
       .exec();
   }
+
   async remove(id: string) {
     return await this.prodModel.findByIdAndDelete(id).exec();
   }
