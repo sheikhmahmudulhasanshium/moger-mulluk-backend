@@ -2,6 +2,7 @@ import {
   Injectable,
   NotFoundException,
   BadRequestException,
+  Logger,
 } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model } from 'mongoose';
@@ -14,6 +15,11 @@ import { MediaService } from '../media/media.service';
 import { MediaPurpose } from '../common/enums/media-purpose.enum';
 import { UpdateMediaOrderDto } from './dto/update-media-order.dto';
 
+interface MediaResponse {
+  url: string;
+  secure_url?: string;
+}
+
 interface ProductCardProjection {
   shortId: string;
   category: string;
@@ -22,16 +28,12 @@ interface ProductCardProjection {
   logistics: { grandTotal: number; uKey: string };
   media?: { thumbnail: string };
 }
+
 interface StatsAggregationResult {
   total: { c: number }[];
   cat: { _id: string; c: number }[];
 }
-interface UnitSet {
-  c: string;
-  g: string;
-}
 
-// Interface for the Gallery Aggregation Result
 export interface CategoryGallery {
   _id: string;
   thumbnails: string[];
@@ -40,6 +42,8 @@ export interface CategoryGallery {
 
 @Injectable()
 export class ProductsService {
+  private readonly logger = new Logger(ProductsService.name);
+
   constructor(
     @InjectModel(Product.name, 'products') private prodModel: Model<Product>,
     private mediaService: MediaService,
@@ -60,28 +64,121 @@ export class ProductsService {
       gallery: product.media?.gallery || [],
     };
 
-    if (files.thumbnail?.length) {
-      const savedMedia = await this.mediaService.uploadFile(
-        files.thumbnail[0],
+    try {
+      if (files.thumbnail?.length) {
+        const savedMedia = (await this.mediaService.uploadFile(
+          files.thumbnail[0],
+          MediaPurpose.PRODUCT,
+          id,
+        )) as MediaResponse;
+        media.thumbnail = savedMedia.secure_url || savedMedia.url;
+      }
+
+      if (files.gallery?.length) {
+        const promises = files.gallery.map((f) =>
+          this.mediaService.uploadFile(f, MediaPurpose.PRODUCT, id),
+        );
+        const results = (await Promise.all(promises)) as MediaResponse[];
+        media.gallery.push(...results.map((r) => r.secure_url || r.url));
+      }
+
+      return await this.prodModel.findByIdAndUpdate(
+        id,
+        { $set: { media } },
+        { new: true },
+      );
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : 'File upload failed';
+      this.logger.error(`Upload Error: ${msg}`);
+      throw new BadRequestException(msg);
+    }
+  }
+
+  async linkProductMedia(id: string, url: string) {
+    const product = await this.prodModel.findById(id);
+    if (!product) throw new NotFoundException('Product not found');
+
+    try {
+      const savedMedia = (await this.mediaService.uploadRemote(
+        url,
+        MediaPurpose.PRODUCT,
+        `thumb-${product.shortId}`,
+        id,
+      )) as MediaResponse;
+
+      const imageUrl = savedMedia.secure_url || savedMedia.url;
+      if (!imageUrl) throw new Error('Cloudinary did not return a URL');
+
+      return await this.prodModel.findByIdAndUpdate(
+        id,
+        { $set: { 'media.thumbnail': imageUrl } },
+        { new: true },
+      );
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : 'Remote upload failed';
+      // THIS LOGS THE REAL REASON IN YOUR TERMINAL
+      this.logger.error(`Link Failure for ${url}: ${msg}`);
+      throw new BadRequestException(`Image Link Failed: ${msg}`);
+    }
+  }
+
+  async addGalleryFile(id: string, file: Express.Multer.File) {
+    const product = await this.prodModel.findById(id);
+    if (!product) throw new NotFoundException('Product not found');
+
+    try {
+      const savedMedia = (await this.mediaService.uploadFile(
+        file,
         MediaPurpose.PRODUCT,
         id,
-      );
-      media.thumbnail = savedMedia.url;
-    }
+      )) as MediaResponse;
 
-    if (files.gallery?.length) {
-      const promises = files.gallery.map((f) =>
-        this.mediaService.uploadFile(f, MediaPurpose.PRODUCT, id),
-      );
-      const results = await Promise.all(promises);
-      media.gallery.push(...results.map((r) => r.url));
-    }
+      const imageUrl = savedMedia.secure_url || savedMedia.url;
 
-    return await this.prodModel.findByIdAndUpdate(
-      id,
-      { $set: { media } },
-      { new: true },
-    );
+      return await this.prodModel.findByIdAndUpdate(
+        id,
+        {
+          $push: { 'media.gallery': imageUrl },
+          ...(!product.media?.thumbnail
+            ? { $set: { 'media.thumbnail': imageUrl } }
+            : {}),
+        },
+        { new: true },
+      );
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : 'Gallery upload failed';
+      throw new BadRequestException(msg);
+    }
+  }
+
+  async addGalleryLink(id: string, url: string) {
+    const product = await this.prodModel.findById(id);
+    if (!product) throw new NotFoundException('Product not found');
+
+    try {
+      const savedMedia = (await this.mediaService.uploadRemote(
+        url,
+        MediaPurpose.PRODUCT,
+        `gal-${Date.now()}-${product.shortId}`,
+        id,
+      )) as MediaResponse;
+
+      const imageUrl = savedMedia.secure_url || savedMedia.url;
+
+      return await this.prodModel.findByIdAndUpdate(
+        id,
+        {
+          $push: { 'media.gallery': imageUrl },
+          ...(!product.media?.thumbnail
+            ? { $set: { 'media.thumbnail': imageUrl } }
+            : {}),
+        },
+        { new: true },
+      );
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : 'Gallery link failed';
+      throw new BadRequestException(msg);
+    }
   }
 
   async updateMediaOrder(id: string, dto: UpdateMediaOrderDto) {
@@ -183,7 +280,7 @@ export class ProductsService {
 
   async getProductStats() {
     const stats = await this.prodModel
-      .aggregate([
+      .aggregate<StatsAggregationResult>([
         {
           $facet: {
             total: [{ $count: 'c' }],
@@ -192,10 +289,10 @@ export class ProductsService {
         },
       ])
       .exec();
-    const result = stats[0] as StatsAggregationResult;
+    const result = stats[0] as StatsAggregationResult | undefined;
     return {
-      total: result.total[0]?.c || 0,
-      breakdown: result.cat,
+      total: result?.total[0]?.c || 0,
+      breakdown: result?.cat || [],
       timestamp: new Date().toISOString(),
     };
   }
@@ -221,29 +318,6 @@ export class ProductsService {
       .exec();
   }
 
-  async linkProductMedia(id: string, url: string) {
-    const product = await this.prodModel.findById(id);
-    if (!product) throw new NotFoundException('Product not found');
-
-    const savedMedia = await this.mediaService.uploadRemote(
-      url,
-      MediaPurpose.PRODUCT,
-      `thumb-${product.shortId}`,
-      id,
-    );
-
-    const media = {
-      thumbnail: savedMedia.url,
-      gallery: product.media?.gallery || [],
-    };
-
-    return await this.prodModel.findByIdAndUpdate(
-      id,
-      { $set: { media } },
-      { new: true },
-    );
-  }
-
   async getProductDetail(shortId: string, lang: string) {
     const item = await this.prodModel.findOne({ shortId }).exec();
     if (!item) throw new NotFoundException('Product not found');
@@ -261,7 +335,7 @@ export class ProductsService {
   }
 
   private transformToCard(item: ProductCardProjection, lang: string) {
-    const unitMap: Record<string, UnitSet> = {
+    const unitMap: Record<string, { c: string; g: string }> = {
       en: { c: 'Cup', g: 'Glass' },
       bn: { c: 'কাপ', g: 'গ্লাস' },
     };
@@ -277,17 +351,15 @@ export class ProductsService {
   }
 
   private transformToDetail(item: Product, lang: string) {
-    const unitMap: Record<string, UnitSet> = {
+    const unitMap: Record<string, { c: string; g: string }> = {
       en: { c: 'Cup', g: 'Glass' },
       bn: { c: 'কাপ', g: 'গ্লাস' },
     };
     const t_unit = unitMap[lang] || unitMap['en'];
-    const title = item.title,
-      desc = item.description;
     return {
       shortId: item.shortId,
-      title: title[lang] || title['en'] || '',
-      description: desc[lang] || desc['en'] || '',
+      title: item.title[lang] || item.title['en'] || '',
+      description: item.description[lang] || item.description['en'] || '',
       price: item.logistics.grandTotal,
       unit: item.logistics.uKey === 'c' ? t_unit.c : t_unit.g,
       media: item.media,
