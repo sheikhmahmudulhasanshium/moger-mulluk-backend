@@ -5,7 +5,7 @@ import {
   Logger,
 } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
-import { Model } from 'mongoose';
+import { Model, UpdateQuery } from 'mongoose';
 import slugify from 'slugify';
 import { Product } from './schemas/product.schema';
 import { CreateProductDto } from './dto/create-product.dto';
@@ -116,7 +116,6 @@ export class ProductsService {
       );
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : 'Remote upload failed';
-      // THIS LOGS THE REAL REASON IN YOUR TERMINAL
       this.logger.error(`Link Failure for ${url}: ${msg}`);
       throw new BadRequestException(`Image Link Failed: ${msg}`);
     }
@@ -134,17 +133,17 @@ export class ProductsService {
       )) as MediaResponse;
 
       const imageUrl = savedMedia.secure_url || savedMedia.url;
+      const updatePayload: UpdateQuery<Product> = {
+        $push: { 'media.gallery': imageUrl },
+      };
 
-      return await this.prodModel.findByIdAndUpdate(
-        id,
-        {
-          $push: { 'media.gallery': imageUrl },
-          ...(!product.media?.thumbnail
-            ? { $set: { 'media.thumbnail': imageUrl } }
-            : {}),
-        },
-        { new: true },
-      );
+      if (!product.media?.thumbnail) {
+        updatePayload.$set = { 'media.thumbnail': imageUrl };
+      }
+
+      return await this.prodModel.findByIdAndUpdate(id, updatePayload, {
+        new: true,
+      });
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : 'Gallery upload failed';
       throw new BadRequestException(msg);
@@ -164,17 +163,17 @@ export class ProductsService {
       )) as MediaResponse;
 
       const imageUrl = savedMedia.secure_url || savedMedia.url;
+      const updatePayload: UpdateQuery<Product> = {
+        $push: { 'media.gallery': imageUrl },
+      };
 
-      return await this.prodModel.findByIdAndUpdate(
-        id,
-        {
-          $push: { 'media.gallery': imageUrl },
-          ...(!product.media?.thumbnail
-            ? { $set: { 'media.thumbnail': imageUrl } }
-            : {}),
-        },
-        { new: true },
-      );
+      if (!product.media?.thumbnail) {
+        updatePayload.$set = { 'media.thumbnail': imageUrl };
+      }
+
+      return await this.prodModel.findByIdAndUpdate(id, updatePayload, {
+        new: true,
+      });
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : 'Gallery link failed';
       throw new BadRequestException(msg);

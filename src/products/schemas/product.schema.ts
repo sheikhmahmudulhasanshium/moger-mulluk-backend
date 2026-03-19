@@ -48,7 +48,14 @@ export class Product extends Document {
     calories: number;
   };
 
-  @Prop({ type: Object })
+  @Prop({
+    type: {
+      thumbnail: { type: String, default: '' },
+      gallery: { type: [String], default: [] },
+    },
+    _id: false,
+    default: { thumbnail: '', gallery: [] },
+  })
   media: {
     thumbnail: string;
     gallery: string[];
