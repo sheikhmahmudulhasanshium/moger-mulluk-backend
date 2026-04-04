@@ -1,3 +1,4 @@
+/// <reference types="multer" />
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model } from 'mongoose';
@@ -18,7 +19,7 @@ export class MediaService {
     res: UploadApiResponse,
     originalName: string,
     purpose: MediaPurpose,
-    refId?: string, // Added refId
+    refId?: string,
   ): Promise<Media> {
     const newMedia = new this.mediaModel({
       name: originalName,
@@ -31,7 +32,7 @@ export class MediaService {
       aspectRatio: res.height > 0 ? res.width / res.height : 0,
       bytes: res.bytes,
       purpose: purpose,
-      refId: refId, // Save the reference
+      refId: refId,
     });
     return await newMedia.save();
   }
@@ -39,7 +40,7 @@ export class MediaService {
   async uploadFile(
     file: Express.Multer.File,
     purpose: MediaPurpose,
-    refId?: string, // Added refId
+    refId?: string,
   ): Promise<Media> {
     const customId = `${purpose}-${nanoid(6)}`;
     const res = await this.cloudinaryService.uploadBuffer(file, customId);
@@ -50,14 +51,13 @@ export class MediaService {
     url: string,
     purpose: MediaPurpose,
     name?: string,
-    refId?: string, // Added refId
+    refId?: string,
   ): Promise<Media> {
     const customId = `${purpose}-${nanoid(6)}`;
     const res = await this.cloudinaryService.uploadString(url, customId);
     return this.saveMetadata(res, name || `remote-${customId}`, purpose, refId);
   }
 
-  // New method to find by ProductID / EmployeeID
   async findByRefId(refId: string): Promise<Media[]> {
     return await this.mediaModel.find({ refId }).sort({ createdAt: -1 }).exec();
   }
