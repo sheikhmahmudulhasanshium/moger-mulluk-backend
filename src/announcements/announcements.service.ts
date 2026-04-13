@@ -20,10 +20,18 @@ export class AnnouncementsService {
     private mediaService: MediaService,
   ) {}
 
-  async create(dto: CreateAnnouncementDto): Promise<Announcement> {
-    return await new this.model(dto).save();
-  }
+  // src/announcements/announcements.service.ts
 
+  async create(dto: CreateAnnouncementDto): Promise<Announcement> {
+    try {
+      const created = new this.model(dto);
+      return await created.save();
+    } catch (error) {
+      // This will show up in Vercel -> Project -> Logs
+      console.error('DANGER_ZONE_CREATE_ERROR:', error);
+      throw error;
+    }
+  }
   async getFeed(lang: string, page = 1, limit = 10, category?: string) {
     const skip = (page - 1) * limit;
     const query = { isAvailable: true, ...(category ? { category } : {}) };
