@@ -47,7 +47,11 @@ async function bootstrap(): Promise<NestExpressApplication> {
   app.use(compression());
   // main.ts
   app.enableCors({
-    origin: ['https://moger-mulluk.vercel.app', 'http://localhost:3000'],
+    origin: [
+      'https://moger-mulluk.vercel.app',
+      'http://localhost:3000',
+      /\.vercel\.app$/,
+    ],
     methods: 'GET,HEAD,PUT,PATCH,POST,DELETE,OPTIONS',
     credentials: true,
     allowedHeaders: ['Content-Type', 'Authorization', 'Accept'],

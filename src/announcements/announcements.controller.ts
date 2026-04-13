@@ -15,7 +15,7 @@ import { FileFieldsInterceptor } from '@nestjs/platform-express';
 import { AnnouncementsService } from './announcements.service';
 import { CreateAnnouncementDto } from './dto/create-announcement.dto';
 import { UpdateAnnouncementDto } from './dto/update-announcement.dto';
-import { LinkMediaDto } from './dto/link-media.dto';
+import { AnnouncementLinkMediaDto } from './dto/link-media.dto';
 import {
   ApiTags,
   ApiOperation,
@@ -62,7 +62,7 @@ export class AnnouncementsController {
 
   @Patch(':id/media-link')
   @ApiOperation({ summary: 'Admin: Link external image URL as thumbnail' })
-  linkMedia(@Param('id') id: string, @Body() dto: LinkMediaDto) {
+  linkMedia(@Param('id') id: string, @Body() dto: AnnouncementLinkMediaDto) {
     return this.announcementsService.linkMedia(id, dto.url);
   }
 
