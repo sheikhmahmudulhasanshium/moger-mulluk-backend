@@ -12,6 +12,7 @@ import { PagesModule } from './pages/pages.module';
 import { CloudinaryModule } from './common/cloudinary/cloudinary.module';
 import { Media, MediaSchema } from './media/media.schema';
 import { MediaModule } from './media/media.module';
+import { AnnouncementsModule } from './announcements/announcements.module';
 
 @Module({
   imports: [
@@ -61,6 +62,7 @@ import { MediaModule } from './media/media.module';
     ProductsModule,
     PagesModule,
     MediaModule,
+    AnnouncementsModule,
   ],
   controllers: [AppController],
   providers: [AppService, { provide: APP_GUARD, useClass: ThrottlerGuard }],

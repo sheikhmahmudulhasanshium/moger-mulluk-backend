@@ -1,0 +1,1090 @@
+import { NestFactory, HttpAdapterHost } from '@nestjs/core';
+import { ValidationPipe, Logger } from '@nestjs/common';
+import { AppModule } from './app.module';
+import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
+import { AllExceptionsFilter } from './all-exceptions.filter';
+import helmet from 'helmet';
+import compression from 'compression';
+import * as mongoSanitize from 'mongo-sanitize';
+import { Request, Response, NextFunction } from 'express';
+import { join } from 'path'; // 1. Import join
+import { NestExpressApplication } from '@nestjs/platform-express'; // 2. Import this
+
+type SanitizeFn = (data: unknown) => unknown;
+type ExpressInstance = (
+  req: Request,
+  res: Response,
+  next?: NextFunction,
+) => void;
+
+let cachedApp: ExpressInstance;
+
+async function bootstrap(): Promise<NestExpressApplication> {
+  // 3. Add <NestExpressApplication> here
+  const app = await NestFactory.create<NestExpressApplication>(AppModule);
+
+  // 4. Tell Nest to serve the public folder
+  // This allows the browser to find /logo.svg, /favicon.ico, etc.
+  app.useStaticAssets(join(process.cwd(), 'public'));
+
+  const httpAdapterHost = app.get(HttpAdapterHost);
+  app.useGlobalFilters(new AllExceptionsFilter(httpAdapterHost));
+
+  app.setGlobalPrefix('api', { exclude: ['/'] });
+
+  app.use(
+    helmet({ contentSecurityPolicy: false, crossOriginEmbedderPolicy: false }),
+  );
+
+  app.use((req: Request, _res: Response, next: NextFunction) => {
+    if (req.body && typeof req.body === 'object') {
+      const sanitize = mongoSanitize as SanitizeFn;
+      req.body = sanitize(req.body) as Record<string, unknown>;
+    }
+    next();
+  });
+
+  app.use(compression());
+  // main.ts
+  app.enableCors({
+    origin: ['https://moger-mulluk.vercel.app', 'http://localhost:3000'],
+    methods: 'GET,HEAD,PUT,PATCH,POST,DELETE,OPTIONS',
+    credentials: true,
+    allowedHeaders: ['Content-Type', 'Authorization', 'Accept'],
+  });
+  app.useGlobalPipes(new ValidationPipe({ whitelist: true, transform: true }));
+
+  const config = new DocumentBuilder()
+    .setTitle('Moger Mulluk Api')
+    .setVersion('1.0')
+    .build();
+  const document = SwaggerModule.createDocument(app, config);
+  SwaggerModule.setup('api', app, document, {
+    customSiteTitle: 'Moger Mulluk API Docs',
+    customJs: [
+      'https://cdn.jsdelivr.net/npm/swagger-ui-dist@5.11.2/swagger-ui-bundle.js',
+      'https://cdn.jsdelivr.net/npm/swagger-ui-dist@5.11.2/swagger-ui-standalone-preset.js',
+    ],
+    customCssUrl: [
+      'https://cdn.jsdelivr.net/npm/swagger-ui-dist@5.11.2/swagger-ui.css',
+    ],
+  });
+
+  return app;
+}
+
+export default async (req: Request, res: Response): Promise<void> => {
+  try {
+    if (!cachedApp) {
+      const app = await bootstrap();
+      await app.init();
+      const instance = app.getHttpAdapter().getInstance() as unknown;
+      cachedApp = instance as ExpressInstance;
+    }
+    cachedApp(req, res);
+  } catch (err: unknown) {
+    console.error('VERCEL_CRASH:', err);
+    res.statusCode = 500;
+    res.setHeader('Content-Type', 'application/json');
+    res.end(
+      JSON.stringify({
+        error: 'Bootstrap Failed',
+        message: err instanceof Error ? err.message : String(err),
+      }),
+    );
+  }
+};
+
+if (process.env.NODE_ENV !== 'production' && !process.env.VERCEL) {
+  const logger = new Logger('Bootstrap');
+  bootstrap()
+    .then(async (app) => {
+      await app.listen(3001);
+      logger.log(`🚀 Server ready at http://localhost:3001/api`);
+    })
+    .catch((err) => console.error(err));
+}
+import { Injectable } from '@nestjs/common';
+import { InjectConnection } from '@nestjs/mongoose';
+import { Connection } from 'mongoose';
+import { ConfigService } from '@nestjs/config';
+
+@Injectable()
+export class AppService {
+  constructor(
+    @InjectConnection('metadata') private metadataConn: Connection,
+    @InjectConnection('products') private productsConn: Connection,
+    private configService: ConfigService,
+  ) {}
+
+  getSystemStatus() {
+    // Explicitly cast to number to satisfy strict ESLint rules
+    // 1 = Connected in Mongoose readyState
+    const isMetadataConnected = (this.metadataConn.readyState as number) === 1;
+    const isProductsConnected = (this.productsConn.readyState as number) === 1;
+
+    return {
+      name: 'Moger Mulluk API',
+      version: '1.0.0',
+      status: 'Online',
+      database: {
+        metadata: isMetadataConnected ? 'Connected' : 'Disconnected',
+        products: isProductsConnected ? 'Connected' : 'Disconnected',
+      },
+      // Check if critical .env is loaded
+      environment: !!this.configService.get<string>('MONGODB_URI'),
+      docs: '/api/docs',
+      timestamp: new Date().toISOString(),
+    };
+  }
+}
+import { Module } from '@nestjs/common';
+import { ConfigModule, ConfigService } from '@nestjs/config';
+import { MongooseModule } from '@nestjs/mongoose';
+import { ThrottlerModule, ThrottlerGuard } from '@nestjs/throttler';
+import { APP_GUARD } from '@nestjs/core';
+import { AppController } from './app.controller';
+import { AppService } from './app.service';
+import { LanguagesModule } from './languages/languages.module';
+import { FaqModule } from './faq/faq.module';
+import { ProductsModule } from './products/products.module';
+import { PagesModule } from './pages/pages.module';
+import { CloudinaryModule } from './common/cloudinary/cloudinary.module';
+import { Media, MediaSchema } from './media/media.schema';
+import { MediaModule } from './media/media.module';
+
+@Module({
+  imports: [
+    ConfigModule.forRoot({ isGlobal: true }),
+    CloudinaryModule,
+
+    // Recommendation: One default connection for serverless stability
+    MongooseModule.forRootAsync({
+      useFactory: (config: ConfigService) => ({
+        uri: config.get<string>('MONGODB_URI'),
+        dbName: 'moger_mulluk_v2', // Use one primary database
+        serverSelectionTimeoutMS: 5000,
+      }),
+      inject: [ConfigService],
+    }),
+
+    // Keep named connections only if they point to different clusters
+    // Otherwise, map them to the default connection for stability
+    MongooseModule.forRootAsync({
+      connectionName: 'products',
+      useFactory: (config: ConfigService) => ({
+        uri: config.get<string>('MONGODB_URI'),
+        dbName: 'products',
+        serverSelectionTimeoutMS: 5000, // Important for Vercel
+        maxPoolSize: 10, // Limit connections in serverless
+      }),
+      inject: [ConfigService],
+    }),
+
+    MongooseModule.forRootAsync({
+      connectionName: 'metadata',
+      useFactory: (config: ConfigService) => ({
+        uri: config.get<string>('MONGODB_URI'),
+        dbName: 'metadata',
+      }),
+      inject: [ConfigService],
+    }),
+
+    MongooseModule.forFeature(
+      [{ name: Media.name, schema: MediaSchema }],
+      'metadata',
+    ),
+
+    LanguagesModule,
+    FaqModule,
+    ThrottlerModule.forRoot([{ ttl: 60000, limit: 20 }]),
+    ProductsModule,
+    PagesModule,
+    MediaModule,
+  ],
+  controllers: [AppController],
+  providers: [AppService, { provide: APP_GUARD, useClass: ThrottlerGuard }],
+})
+export class AppModule {}
+import { Controller, Get, Res } from '@nestjs/common';
+import { Response } from 'express';
+import { join } from 'path';
+import { readFileSync } from 'fs';
+import { ApiOperation, ApiTags } from '@nestjs/swagger';
+import { AppService } from './app.service'; // Import the service
+
+@ApiTags('System')
+@Controller()
+export class AppController {
+  // Inject AppService to access getSystemStatus()
+  constructor(private readonly appService: AppService) {}
+
+  @Get()
+  @ApiOperation({ summary: 'Serve Home Page' })
+  getHome(@Res() res: Response): void {
+    const indexPath = join(process.cwd(), 'public', 'index.html');
+    const html = readFileSync(indexPath, 'utf8');
+
+    res.statusCode = 200;
+    res.setHeader('Content-Type', 'text/html');
+    res.end(html);
+  }
+
+  @Get('status')
+  @ApiOperation({ summary: 'System Health Check' })
+  getStatus() {
+    // Return the detailed status from the service (which includes DB connection checks)
+    return this.appService.getSystemStatus();
+  }
+}
+import {
+  ExceptionFilter,
+  Catch,
+  ArgumentsHost,
+  HttpException,
+  HttpStatus,
+  Logger,
+} from '@nestjs/common';
+import { HttpAdapterHost } from '@nestjs/core';
+import { Request, Response } from 'express';
+
+@Catch()
+export class AllExceptionsFilter implements ExceptionFilter {
+  private readonly logger = new Logger('AllExceptionsFilter');
+  constructor(private readonly httpAdapterHost: HttpAdapterHost) {}
+
+  catch(exception: unknown, host: ArgumentsHost): void {
+    const { httpAdapter } = this.httpAdapterHost;
+    const ctx = host.switchToHttp();
+    const response = ctx.getResponse<Response>();
+    const url = httpAdapter.getRequestUrl(ctx.getRequest<Request>()) as string;
+
+    const status: number =
+      exception instanceof HttpException
+        ? exception.getStatus()
+        : (HttpStatus.INTERNAL_SERVER_ERROR as number);
+
+    if (status !== (HttpStatus.NOT_FOUND as number) || url.startsWith('/api')) {
+      this.logger.error(`Status: ${status} | Path: ${url}`);
+    }
+
+    httpAdapter.reply(
+      response,
+      { statusCode: status, path: url, timestamp: new Date().toISOString() },
+      status,
+    );
+  }
+}
+/// <reference types="multer" />
+import {
+  Injectable,
+  NotFoundException,
+  BadRequestException,
+  Logger,
+} from '@nestjs/common';
+import { InjectModel } from '@nestjs/mongoose';
+import { Model, UpdateQuery } from 'mongoose';
+import slugify from 'slugify';
+import { Product } from './schemas/product.schema';
+import { CreateProductDto } from './dto/create-product.dto';
+import { UpdateProductDto } from './dto/update-product.dto';
+import { SearchQueryDto } from './dto/search-query.dto';
+import { MediaService } from '../media/media.service';
+import { MediaPurpose } from '../common/enums/media-purpose.enum';
+import { UpdateMediaOrderDto } from './dto/update-media-order.dto';
+
+interface MediaResponse {
+  url: string;
+  secure_url?: string;
+}
+
+interface ProductCardProjection {
+  shortId: string;
+  category: string;
+  tags: string[];
+  title: Record<string, string>;
+  logistics: { grandTotal: number; uKey: string };
+  media?: { thumbnail: string };
+}
+
+interface StatsAggregationResult {
+  total: { c: number }[];
+  cat: { _id: string; c: number }[];
+}
+
+export interface CategoryGallery {
+  _id: string;
+  thumbnails: string[];
+  count: number;
+}
+
+@Injectable()
+export class ProductsService {
+  private readonly logger = new Logger(ProductsService.name);
+
+  constructor(
+    @InjectModel(Product.name, 'products') private prodModel: Model<Product>,
+    private mediaService: MediaService,
+  ) {}
+
+  async uploadProductMedia(
+    id: string,
+    files: {
+      thumbnail?: Express.Multer.File[];
+      gallery?: Express.Multer.File[];
+    },
+  ) {
+    const product = await this.prodModel.findById(id);
+    if (!product) throw new NotFoundException('Product not found');
+
+    const media = {
+      thumbnail: product.media?.thumbnail || '',
+      gallery: product.media?.gallery || [],
+    };
+
+    try {
+      if (files.thumbnail?.length) {
+        const savedMedia = (await this.mediaService.uploadFile(
+          files.thumbnail[0],
+          MediaPurpose.PRODUCT,
+          id,
+        )) as MediaResponse;
+        media.thumbnail = savedMedia.secure_url || savedMedia.url;
+      }
+
+      if (files.gallery?.length) {
+        const promises = files.gallery.map((f) =>
+          this.mediaService.uploadFile(f, MediaPurpose.PRODUCT, id),
+        );
+        const results = (await Promise.all(promises)) as MediaResponse[];
+        media.gallery.push(...results.map((r) => r.secure_url || r.url));
+      }
+
+      return await this.prodModel.findByIdAndUpdate(
+        id,
+        { $set: { media } },
+        { new: true },
+      );
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : 'File upload failed';
+      this.logger.error(`Upload Error: ${msg}`);
+      throw new BadRequestException(msg);
+    }
+  }
+
+  async linkProductMedia(id: string, url: string) {
+    const product = await this.prodModel.findById(id);
+    if (!product) throw new NotFoundException('Product not found');
+
+    try {
+      const savedMedia = (await this.mediaService.uploadRemote(
+        url,
+        MediaPurpose.PRODUCT,
+        `thumb-${product.shortId}`,
+        id,
+      )) as MediaResponse;
+
+      const imageUrl = savedMedia.secure_url || savedMedia.url;
+      if (!imageUrl) throw new Error('Cloudinary did not return a URL');
+
+      return await this.prodModel.findByIdAndUpdate(
+        id,
+        { $set: { 'media.thumbnail': imageUrl } },
+        { new: true },
+      );
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : 'Remote upload failed';
+      this.logger.error(`Link Failure for ${url}: ${msg}`);
+      throw new BadRequestException(`Image Link Failed: ${msg}`);
+    }
+  }
+
+  async addGalleryFile(id: string, file: Express.Multer.File) {
+    const product = await this.prodModel.findById(id);
+    if (!product) throw new NotFoundException('Product not found');
+
+    try {
+      const savedMedia = (await this.mediaService.uploadFile(
+        file,
+        MediaPurpose.PRODUCT,
+        id,
+      )) as MediaResponse;
+
+      const imageUrl = savedMedia.secure_url || savedMedia.url;
+      const updatePayload: UpdateQuery<Product> = {
+        $push: { 'media.gallery': imageUrl },
+      };
+
+      if (!product.media?.thumbnail) {
+        updatePayload.$set = { 'media.thumbnail': imageUrl };
+      }
+
+      return await this.prodModel.findByIdAndUpdate(id, updatePayload, {
+        new: true,
+      });
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : 'Gallery upload failed';
+      throw new BadRequestException(msg);
+    }
+  }
+
+  async addGalleryLink(id: string, url: string) {
+    const product = await this.prodModel.findById(id);
+    if (!product) throw new NotFoundException('Product not found');
+
+    try {
+      const savedMedia = (await this.mediaService.uploadRemote(
+        url,
+        MediaPurpose.PRODUCT,
+        `gal-${Date.now()}-${product.shortId}`,
+        id,
+      )) as MediaResponse;
+
+      const imageUrl = savedMedia.secure_url || savedMedia.url;
+      const updatePayload: UpdateQuery<Product> = {
+        $push: { 'media.gallery': imageUrl },
+      };
+
+      if (!product.media?.thumbnail) {
+        updatePayload.$set = { 'media.thumbnail': imageUrl };
+      }
+
+      return await this.prodModel.findByIdAndUpdate(id, updatePayload, {
+        new: true,
+      });
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : 'Gallery link failed';
+      throw new BadRequestException(msg);
+    }
+  }
+
+  async updateMediaOrder(id: string, dto: UpdateMediaOrderDto) {
+    return await this.prodModel.findByIdAndUpdate(
+      id,
+      {
+        $set: {
+          'media.thumbnail': dto.thumbnail,
+          'media.gallery': dto.gallery,
+        },
+      },
+      { new: true },
+    );
+  }
+
+  async create(dto: CreateProductDto): Promise<Product> {
+    if (!dto.title?.en) throw new BadRequestException('English title required');
+    const slug = slugify(dto.title.en, { lower: true, strict: true });
+    const shortId = `${dto.category}--${String(dto.position).padStart(2, '0')}--${slug}`;
+    return await new this.prodModel({
+      ...dto,
+      shortId: dto.shortId || shortId,
+    }).save();
+  }
+
+  async findOne(id: string) {
+    return await this.prodModel.findById(id).exec();
+  }
+
+  async findAllRaw(page = 1, limit = 20) {
+    const skip = (page - 1) * limit;
+    const [total, data] = await Promise.all([
+      this.prodModel.countDocuments(),
+      this.prodModel
+        .find()
+        .sort({ position: 1 })
+        .skip(skip)
+        .limit(limit)
+        .exec(),
+    ]);
+    return { data, meta: { totalItems: total, currentPage: page } };
+  }
+
+  async getMenuCards(lang: string, page = 1, limit = 10, category?: string) {
+    const skip = (page - 1) * limit;
+    const query = {
+      'logistics.isAvailable': true,
+      ...(category ? { category } : {}),
+    };
+    const items = (await this.prodModel
+      .find(query)
+      .select(
+        'shortId category tags title logistics.grandTotal logistics.uKey media.thumbnail',
+      )
+      .sort({ position: 1 })
+      .skip(skip)
+      .limit(limit)
+      .lean()
+      .exec()) as unknown as ProductCardProjection[];
+    const total = await this.prodModel.countDocuments(query);
+    return {
+      data: items.map((i) => this.transformToCard(i, lang)),
+      meta: { totalItems: total, currentPage: page },
+    };
+  }
+
+  async searchProducts(lang: string, dto: SearchQueryDto) {
+    const p = dto.page || 1;
+    const l = dto.limit || 10;
+    const regex = { $regex: dto.q, $options: 'i' };
+    const filter = {
+      'logistics.isAvailable': true,
+      ...(dto.cat ? { category: dto.cat } : {}),
+      $or: [
+        { 'title.en': regex },
+        { 'title.bn': regex },
+        { 'title.hi': regex },
+        { 'title.es': regex },
+        { tags: { $in: [new RegExp(dto.q, 'i')] } },
+        { shortId: regex },
+      ],
+    };
+    const items = (await this.prodModel
+      .find(filter)
+      .select(
+        'shortId category tags title logistics.grandTotal logistics.uKey media.thumbnail',
+      )
+      .sort({ position: 1 })
+      .skip((p - 1) * l)
+      .limit(l)
+      .lean()
+      .exec()) as unknown as ProductCardProjection[];
+    const total = await this.prodModel.countDocuments(filter);
+    return {
+      data: items.map((i) => this.transformToCard(i, lang)),
+      meta: { totalItems: total, currentPage: p },
+    };
+  }
+
+  async getProductStats() {
+    const stats = await this.prodModel
+      .aggregate<StatsAggregationResult>([
+        {
+          $facet: {
+            total: [{ $count: 'c' }],
+            cat: [{ $group: { _id: '$category', c: { $sum: 1 } } }],
+          },
+        },
+      ])
+      .exec();
+    const result = stats[0] as StatsAggregationResult | undefined;
+    return {
+      total: result?.total[0]?.c || 0,
+      breakdown: result?.cat || [],
+      timestamp: new Date().toISOString(),
+    };
+  }
+
+  async getProductGallery(): Promise<CategoryGallery[]> {
+    return await this.prodModel
+      .aggregate<CategoryGallery>([
+        {
+          $match: {
+            'media.thumbnail': { $exists: true, $ne: '' },
+            'logistics.isAvailable': true,
+          },
+        },
+        {
+          $group: {
+            _id: '$category',
+            thumbnails: { $push: '$media.thumbnail' },
+            count: { $sum: 1 },
+          },
+        },
+        { $sort: { _id: 1 } },
+      ])
+      .exec();
+  }
+
+  async getProductDetail(shortId: string, lang: string) {
+    const item = await this.prodModel.findOne({ shortId }).exec();
+    if (!item) throw new NotFoundException('Product not found');
+    return this.transformToDetail(item, lang);
+  }
+
+  async update(id: string, dto: UpdateProductDto) {
+    return await this.prodModel
+      .findByIdAndUpdate(id, dto, { new: true })
+      .exec();
+  }
+
+  async remove(id: string) {
+    return await this.prodModel.findByIdAndDelete(id).exec();
+  }
+
+  private transformToCard(item: ProductCardProjection, lang: string) {
+    const unitMap: Record<string, { c: string; g: string }> = {
+      en: { c: 'Cup', g: 'Glass' },
+      bn: { c: 'কাপ', g: 'গ্লাস' },
+    };
+    const t_unit = unitMap[lang] || unitMap['en'];
+    return {
+      shortId: item.shortId,
+      category: item.category,
+      title: item.title[lang] || item.title['en'] || '',
+      price: item.logistics.grandTotal,
+      unit: item.logistics.uKey === 'c' ? t_unit.c : t_unit.g,
+      thumbnail: item.media?.thumbnail || '',
+    };
+  }
+
+  private transformToDetail(item: Product, lang: string) {
+    const unitMap: Record<string, { c: string; g: string }> = {
+      en: { c: 'Cup', g: 'Glass' },
+      bn: { c: 'কাপ', g: 'গ্লাস' },
+    };
+    const t_unit = unitMap[lang] || unitMap['en'];
+    return {
+      shortId: item.shortId,
+      title: item.title[lang] || item.title['en'] || '',
+      description: item.description[lang] || item.description['en'] || '',
+      price: item.logistics.grandTotal,
+      unit: item.logistics.uKey === 'c' ? t_unit.c : t_unit.g,
+      media: item.media,
+    };
+  }
+}
+import { Module } from '@nestjs/common';
+import { MongooseModule } from '@nestjs/mongoose';
+import { ProductsService } from './products.service';
+import { ProductsController } from './products.controller';
+import { Product, ProductSchema } from './schemas/product.schema';
+import { CloudinaryModule } from '@/common/cloudinary/cloudinary.module';
+import { MediaModule } from '../media/media.module';
+
+@Module({
+  imports: [
+    MongooseModule.forFeature(
+      [{ name: Product.name, schema: ProductSchema }],
+      'products',
+    ),
+    CloudinaryModule,
+    MediaModule, // Added to allow ProductsService to use MediaService
+  ],
+  controllers: [ProductsController],
+  providers: [ProductsService],
+})
+export class ProductsModule {}
+/// <reference types="multer" />
+import {
+  Controller,
+  Get,
+  Post,
+  Body,
+  Patch,
+  Param,
+  Delete,
+  Query,
+  UseInterceptors,
+  UploadedFiles,
+  UploadedFile,
+  BadRequestException,
+} from '@nestjs/common';
+import {
+  FileFieldsInterceptor,
+  FileInterceptor,
+} from '@nestjs/platform-express';
+import { ProductsService, CategoryGallery } from './products.service';
+import { CreateProductDto } from './dto/create-product.dto';
+import { UpdateProductDto } from './dto/update-product.dto';
+import { SearchQueryDto } from './dto/search-query.dto';
+import { UpdateMediaOrderDto } from './dto/update-media-order.dto';
+import { ApiTags, ApiOperation, ApiConsumes, ApiBody } from '@nestjs/swagger';
+import { LinkMediaDto } from './dto/link-media.dto';
+
+@ApiTags('Products')
+@Controller('products')
+export class ProductsController {
+  constructor(private readonly productsService: ProductsService) {}
+
+  @Post()
+  @ApiOperation({ summary: 'Admin: Create product' })
+  create(@Body() dto: CreateProductDto) {
+    return this.productsService.create(dto);
+  }
+
+  @Get('stats/count')
+  @ApiOperation({ summary: 'System: Get counts' })
+  getProductCount() {
+    return this.productsService.getProductStats();
+  }
+
+  @Get('gallery')
+  @ApiOperation({ summary: 'Public: Get thumbnails grouped by category' })
+  getProductGallery(): Promise<CategoryGallery[]> {
+    return this.productsService.getProductGallery();
+  }
+
+  @Get('admin/raw')
+  @ApiOperation({ summary: 'Admin: Get all raw documents' })
+  findAllRaw(@Query('page') p?: string, @Query('limit') l?: string) {
+    return this.productsService.findAllRaw(
+      p ? parseInt(p) : 1,
+      l ? parseInt(l) : 20,
+    );
+  }
+
+  @Get('search/:lang')
+  @ApiOperation({ summary: 'Public: Search by keywords' })
+  search(@Param('lang') lang: string, @Query() q: SearchQueryDto) {
+    return this.productsService.searchProducts(lang, q);
+  }
+
+  @Get('menu/:lang')
+  @ApiOperation({ summary: 'Public: Get card view menu' })
+  getMenu(
+    @Param('lang') lang: string,
+    @Query('page') p?: string,
+    @Query('limit') l?: string,
+    @Query('cat') c?: string,
+  ) {
+    return this.productsService.getMenuCards(
+      lang,
+      p ? parseInt(p) : 1,
+      l ? parseInt(l) : 10,
+      c,
+    );
+  }
+
+  @Get('detail/:lang/:shortId')
+  @ApiOperation({ summary: 'Public: Get full details' })
+  getDetail(@Param('lang') lang: string, @Param('shortId') sid: string) {
+    return this.productsService.getProductDetail(sid, lang);
+  }
+
+  @Get(':id')
+  @ApiOperation({ summary: 'Admin: Get by Mongo ID' })
+  findOne(@Param('id') id: string) {
+    return this.productsService.findOne(id);
+  }
+
+  @Patch(':id/media-link')
+  @ApiOperation({ summary: 'Admin: Link an external image URL as thumbnail' })
+  async linkMedia(@Param('id') id: string, @Body() dto: LinkMediaDto) {
+    return this.productsService.linkProductMedia(id, dto.url);
+  }
+
+  @Patch(':id/media')
+  @ApiOperation({ summary: 'Admin: Bulk upload thumbnail and gallery' })
+  @ApiConsumes('multipart/form-data')
+  @ApiBody({
+    schema: {
+      type: 'object',
+      properties: {
+        thumbnail: { type: 'string', format: 'binary' },
+        gallery: { type: 'array', items: { type: 'string', format: 'binary' } },
+      },
+    },
+  })
+  @UseInterceptors(
+    FileFieldsInterceptor([
+      { name: 'thumbnail', maxCount: 1 },
+      { name: 'gallery', maxCount: 10 },
+    ]),
+  )
+  async uploadMedia(
+    @Param('id') id: string,
+    @UploadedFiles()
+    files: {
+      thumbnail?: Express.Multer.File[];
+      gallery?: Express.Multer.File[];
+    },
+  ) {
+    if (!files || (!files.thumbnail && !files.gallery))
+      throw new BadRequestException('No files');
+    return this.productsService.uploadProductMedia(id, files);
+  }
+
+  @Patch(':id/gallery/upload')
+  @ApiOperation({ summary: 'Admin: Add one file to gallery' })
+  @ApiConsumes('multipart/form-data')
+  @ApiBody({
+    schema: {
+      type: 'object',
+      properties: { file: { type: 'string', format: 'binary' } },
+    },
+  })
+  @UseInterceptors(FileInterceptor('file'))
+  async addGalleryFile(
+    @Param('id') id: string,
+    @UploadedFile() file: Express.Multer.File,
+  ) {
+    if (!file) throw new BadRequestException('No file provided');
+    return this.productsService.addGalleryFile(id, file);
+  }
+
+  @Patch(':id/gallery/link')
+  @ApiOperation({ summary: 'Admin: Add one remote URL to gallery' })
+  async addGalleryLink(@Param('id') id: string, @Body() dto: LinkMediaDto) {
+    return this.productsService.addGalleryLink(id, dto.url);
+  }
+
+  @Patch(':id/media/reorder')
+  @ApiOperation({ summary: 'Admin: Reorder gallery' })
+  async updateMediaOrder(
+    @Param('id') id: string,
+    @Body() dto: UpdateMediaOrderDto,
+  ) {
+    return this.productsService.updateMediaOrder(id, dto);
+  }
+
+  @Patch(':id')
+  @ApiOperation({ summary: 'Admin: Update product' })
+  update(@Param('id') id: string, @Body() dto: UpdateProductDto) {
+    return this.productsService.update(id, dto);
+  }
+
+  @Delete(':id')
+  @ApiOperation({ summary: 'Admin: Delete product' })
+  remove(@Param('id') id: string) {
+    return this.productsService.remove(id);
+  }
+}
+import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
+import { Document, Types } from 'mongoose';
+
+@Schema({ timestamps: true, collection: 'menu' })
+export class Product extends Document {
+  declare _id: Types.ObjectId;
+
+  @Prop({ required: true, unique: true, index: true })
+  shortId: string;
+
+  @Prop({ default: 0, index: true })
+  position: number;
+
+  @Prop({
+    required: true,
+    enum: ['tea', 'coffee', 'beverage', 'desert', 'snacks'],
+    index: true,
+  })
+  category: string;
+
+  @Prop({ type: [String], index: true })
+  tags: string[];
+
+  @Prop({ type: Object, required: true })
+  title: Record<string, string>;
+
+  @Prop({ type: Object, required: true })
+  description: Record<string, string>;
+
+  @Prop({ type: Object })
+  ingredients: Record<string, string>;
+
+  @Prop({ type: Object })
+  healthBenefit: Record<string, string>;
+
+  @Prop({ type: Object })
+  origin: Record<string, string>;
+
+  @Prop({ type: Object })
+  funFact: Record<string, string>;
+
+  @Prop({ type: Object, required: true })
+  logistics: {
+    stock: number;
+    isAvailable: boolean;
+    grandTotal: number;
+    uKey: string;
+    calories: number;
+  };
+
+  @Prop({
+    type: {
+      thumbnail: { type: String, default: '' },
+      gallery: { type: [String], default: [] },
+    },
+    _id: false,
+    default: { thumbnail: '', gallery: [] },
+  })
+  media: {
+    thumbnail: string;
+    gallery: string[];
+  };
+
+  createdAt: Date;
+  updatedAt: Date;
+}
+
+export const ProductSchema = SchemaFactory.createForClass(Product);
+
+// Text Indexing for broad language searching
+ProductSchema.index({
+  'title.en': 'text',
+  'title.bn': 'text',
+  'title.hi': 'text',
+  'title.es': 'text',
+  'description.en': 'text',
+  'description.bn': 'text',
+  'ingredients.en': 'text',
+  'ingredients.bn': 'text',
+  tags: 'text',
+  shortId: 'text',
+});
+import { PartialType } from '@nestjs/swagger';
+import { CreateProductDto } from './create-product.dto';
+
+export class UpdateProductDto extends PartialType(CreateProductDto) {}
+/// <reference types="multer" />
+import { Injectable, NotFoundException } from '@nestjs/common';
+import { InjectModel } from '@nestjs/mongoose';
+import { Model } from 'mongoose';
+import { nanoid } from 'nanoid';
+import { Media } from './media.schema';
+import { CloudinaryService } from '../common/cloudinary/cloudinary.service';
+import { MediaPurpose } from '../common/enums/media-purpose.enum';
+import { UploadApiResponse } from 'cloudinary';
+
+@Injectable()
+export class MediaService {
+  constructor(
+    @InjectModel(Media.name, 'metadata') private mediaModel: Model<Media>,
+    private readonly cloudinaryService: CloudinaryService,
+  ) {}
+
+  private async saveMetadata(
+    res: UploadApiResponse,
+    originalName: string,
+    purpose: MediaPurpose,
+    refId?: string,
+  ): Promise<Media> {
+    const newMedia = new this.mediaModel({
+      name: originalName,
+      url: res.secure_url,
+      publicId: res.public_id,
+      format: res.format,
+      resourceType: res.resource_type,
+      width: res.width || 0,
+      height: res.height || 0,
+      aspectRatio: res.height > 0 ? res.width / res.height : 0,
+      bytes: res.bytes,
+      purpose: purpose,
+      refId: refId,
+    });
+    return await newMedia.save();
+  }
+
+  async uploadFile(
+    file: Express.Multer.File,
+    purpose: MediaPurpose,
+    refId?: string,
+  ): Promise<Media> {
+    const customId = `${purpose}-${nanoid(6)}`;
+    const res = await this.cloudinaryService.uploadBuffer(file, customId);
+    return this.saveMetadata(res, file.originalname, purpose, refId);
+  }
+
+  async uploadRemote(
+    url: string,
+    purpose: MediaPurpose,
+    name?: string,
+    refId?: string,
+  ): Promise<Media> {
+    const customId = `${purpose}-${nanoid(6)}`;
+    const res = await this.cloudinaryService.uploadString(url, customId);
+    return this.saveMetadata(res, name || `remote-${customId}`, purpose, refId);
+  }
+
+  async findByRefId(refId: string): Promise<Media[]> {
+    return await this.mediaModel.find({ refId }).sort({ createdAt: -1 }).exec();
+  }
+
+  async findAll(page: number, limit: number, purpose?: MediaPurpose) {
+    const filter = purpose ? { purpose } : {};
+    const skip = (Math.max(1, page) - 1) * limit;
+
+    const [data, total] = await Promise.all([
+      this.mediaModel
+        .find(filter)
+        .sort({ createdAt: -1 })
+        .skip(skip)
+        .limit(limit)
+        .exec(),
+      this.mediaModel.countDocuments(filter),
+    ]);
+
+    return {
+      data,
+      meta: { total, page, limit, totalPages: Math.ceil(total / limit) },
+    };
+  }
+
+  async findAllRaw(purpose?: MediaPurpose): Promise<Media[]> {
+    return await this.mediaModel
+      .find(purpose ? { purpose } : {})
+      .sort({ createdAt: -1 })
+      .exec();
+  }
+
+  async getCount(purpose?: MediaPurpose) {
+    const count = await this.mediaModel.countDocuments(
+      purpose ? { purpose } : {},
+    );
+    return { count, purpose: purpose || 'all' };
+  }
+
+  async findById(id: string): Promise<Media> {
+    const media = await this.mediaModel.findById(id);
+    if (!media) throw new NotFoundException('Media record not found');
+    return media;
+  }
+
+  async delete(id: string): Promise<Media | null> {
+    const media = await this.findById(id);
+    await this.cloudinaryService.deleteFile(media.publicId);
+    return await this.mediaModel.findByIdAndDelete(id);
+  }
+}
+generate announcements api like product
+where top news, paginations, flters, orders, languages api will be isAvailable
+already created blank nest g res announcements --no-spec
+
+sample data:
+const translations = {
+  en: {
+    title: "The \n Dispatch",
+    subtitle: "Directives from the Realm",
+    archiveCta: "View Archive",
+    notices: [
+      "NOTICE: Madrid Branch reaching 100k cups served.",
+      "UPDATE: New Batch of 'Espresso Noir' Ethiopia beans arriving Tuesday.",
+      "ALERT: Weekend Brunch timings extended until 4:00 PM.",
+      "DIRECTIVE: Eco-friendly mugs now mandatory across all branches."
+    ]
+  },
+  bn: {
+    title: "দ্য \n ডিসপ্যাচ",
+    subtitle: "সাম্রাজ্য থেকে সরাসরি বার্তা",
+    archiveCta: "আর্কাইভ দেখুন",
+    notices: [
+      "নোটিশ: মাদ্রিদ শাখা ১ লক্ষ কাপ কফি পরিবেশন করেছে।",
+      "আপডেট: মঙ্গলবার ইথিওপিয়া থেকে 'এসপ্রেসো নোয়ার' মটরশুঁটির নতুন ব্যাচ আসছে।",
+      "অ্যালার্ট: উইকএন্ড ব্রাঞ্চের সময় বিকেল ৪টা পর্যন্ত বাড়ানো হয়েছে।",
+      "নির্দেশনা: এখন থেকে সমস্ত শাখায় পরিবেশবান্ধব মগ বাধ্যতামূলক।"
+    ]
+  },
+  hi: {
+    title: "द \n डिस्पैच",
+    subtitle: "साम्राज्य से सीधे निर्देश",
+    archiveCta: "पुरालेख देखें",
+    notices: [
+      "नोटिस: मैड्रिड शाखा 1 लाख कप कॉफी परोसने के मील के पत्थर पर पहुंची।",
+      "अपडेट: मंगलवार को इथियोपिया से 'एस्प्रेसो नोयर' बीन्स का नया बैच आ रहा है।",
+      "अलर्ट: वीकेंड ब्रंच का समय शाम 4:00 बजे तक बढ़ा दिया गया है।",
+      "निर्देश: अब सभी शाखाओं में पर्यावरण के अनुकूल मग अनिवार्य हैं।"
+    ]
+  },
+  es: {
+    title: "El \n Despacho",
+    subtitle: "Directivas desde el Reino",
+    archiveCta: "Ver Archivo",
+    notices: [
+      "AVISO: La sucursal de Madrid alcanza las 100.000 tazas servidas.",
+      "ACTUALIZACIÓN: Nuevo lote de granos 'Espresso Noir' llega el martes.",
+      "ALERTA: Horario de brunch de fin de semana extendido hasta las 4:00 PM.",
+      "DIRECTIVA: Tazas ecológicas obligatorias en todas las sucursales."
+    ]
+  }
+};
+
+not finalized add imageUrl, externalurls, pdfs, short description,long description, title, priority, 
