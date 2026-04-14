@@ -6,18 +6,18 @@ import {
   Announcement,
   AnnouncementSchema,
 } from './schemas/announcement.schema';
-import { MediaModule } from '../media/media.module'; // Relative path
-import { CloudinaryModule } from '../common/cloudinary/cloudinary.module'; // Relative path
+import { Media, MediaSchema } from '../media/media.schema';
+import { MediaModule } from '../media/media.module';
 
 @Module({
   imports: [
-    // Ensure this is on the correct connection.
-    // If it belongs in 'metadata', add 'metadata' as the second argument:
     MongooseModule.forFeature(
-      [{ name: Announcement.name, schema: AnnouncementSchema }],
-      'metadata', // <--- Change this if announcements are in the metadata DB
+      [
+        { name: Announcement.name, schema: AnnouncementSchema },
+        { name: Media.name, schema: MediaSchema }, // Added this for cleanup logic
+      ],
+      'metadata',
     ),
-    CloudinaryModule,
     MediaModule,
   ],
   controllers: [AnnouncementsController],

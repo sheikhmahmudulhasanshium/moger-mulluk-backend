@@ -1,4 +1,3 @@
-// src/announcements/schemas/announcement.schema.ts
 import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
 import { Document, Types } from 'mongoose';
 
@@ -31,11 +30,18 @@ export class Announcement extends Document {
     gallery: string[];
   };
 
-  @Prop({ type: [String], default: [] })
-  externalUrls: string[];
-
-  @Prop({ type: [String], default: [] })
-  pdfs: string[];
+  @Prop({
+    type: {
+      pdfs: { type: [String], default: [] },
+      externalUrls: { type: [String], default: [] },
+    },
+    _id: false,
+    default: { pdfs: [], externalUrls: [] },
+  })
+  attachments: {
+    pdfs: string[];
+    externalUrls: string[];
+  };
 
   @Prop({ default: 0, index: true })
   priority: number;
@@ -43,11 +49,7 @@ export class Announcement extends Document {
   @Prop({ default: true, index: true })
   isAvailable: boolean;
 
-  @Prop({
-    required: true,
-    enum: ['notice', 'update', 'alert', 'directive', 'news'],
-    index: true,
-  })
+  @Prop({ required: true, index: true })
   category: string;
 
   createdAt: Date;

@@ -1,8 +1,8 @@
-// src/announcements/announcements.service.ts
 import {
   Injectable,
   NotFoundException,
   BadRequestException,
+  Logger,
 } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model } from 'mongoose';
@@ -11,27 +11,33 @@ import { CreateAnnouncementDto } from './dto/create-announcement.dto';
 import { UpdateAnnouncementDto } from './dto/update-announcement.dto';
 import { MediaService } from '../media/media.service';
 import { MediaPurpose } from '../common/enums/media-purpose.enum';
+import { Media } from '../media/media.schema';
 
 @Injectable()
 export class AnnouncementsService {
+  private readonly logger = new Logger(AnnouncementsService.name);
+
   constructor(
     @InjectModel(Announcement.name, 'metadata')
     private model: Model<Announcement>,
+    @InjectModel(Media.name, 'metadata') private mediaModel: Model<Media>,
     private mediaService: MediaService,
   ) {}
 
-  // src/announcements/announcements.service.ts
-
   async create(dto: CreateAnnouncementDto): Promise<Announcement> {
-    try {
-      const created = new this.model(dto);
-      return await created.save();
-    } catch (error) {
-      // This will show up in Vercel -> Project -> Logs
-      console.error('DANGER_ZONE_CREATE_ERROR:', error);
-      throw error;
-    }
+    if (!dto.title?.en)
+      throw new BadRequestException('English title is required');
+    return await new this.model(dto).save();
   }
+
+  async findAllRaw(): Promise<Announcement[]> {
+    return (await this.model
+      .find()
+      .sort({ priority: -1, createdAt: -1 })
+      .lean()
+      .exec()) as Announcement[];
+  }
+
   async getFeed(lang: string, page = 1, limit = 10, category?: string) {
     const skip = (page - 1) * limit;
     const query = { isAvailable: true, ...(category ? { category } : {}) };
@@ -47,24 +53,19 @@ export class AnnouncementsService {
     const total = await this.model.countDocuments(query);
 
     return {
-      data: items.map((i) =>
-        this.transform(i as unknown as Announcement, lang),
+      data: (items as unknown as Announcement[]).map((i) =>
+        this.transform(i, lang),
       ),
       meta: { total, page, limit },
     };
   }
 
-  async getTopNews(lang: string, limit = 10) {
-    const items = await this.model
-      .find({ isAvailable: true })
-      .sort({ priority: -1, createdAt: -1 })
-      .limit(limit)
-      .lean()
+  async update(id: string, dto: UpdateAnnouncementDto): Promise<Announcement> {
+    const updated = await this.model
+      .findByIdAndUpdate(id, { $set: dto }, { new: true, runValidators: true })
       .exec();
-
-    return items.map((item) =>
-      this.transform(item as unknown as Announcement, lang),
-    );
+    if (!updated) throw new NotFoundException('Announcement not found');
+    return updated;
   }
 
   async uploadMedia(
@@ -73,91 +74,69 @@ export class AnnouncementsService {
       thumbnail?: Express.Multer.File[];
       gallery?: Express.Multer.File[];
     },
-  ) {
+  ): Promise<Announcement> {
     const ann = await this.model.findById(id);
-    if (!ann) throw new NotFoundException('Announcement not found');
-
-    const media = {
-      thumbnail: ann.media?.thumbnail || '',
-      gallery: ann.media?.gallery || [],
-    };
+    if (!ann) throw new NotFoundException();
 
     if (files.thumbnail?.length) {
+      if (ann.media.thumbnail)
+        await this.cleanupMediaByUrl(ann.media.thumbnail);
       const res = await this.mediaService.uploadFile(
         files.thumbnail[0],
         MediaPurpose.ANNOUNCEMENT,
         id,
       );
-      media.thumbnail = res.url;
+      ann.media.thumbnail = res.url;
     }
 
     if (files.gallery?.length) {
-      const promises = files.gallery.map((f) =>
-        this.mediaService.uploadFile(f, MediaPurpose.ANNOUNCEMENT, id),
+      const results = await Promise.all(
+        files.gallery.map((f) =>
+          this.mediaService.uploadFile(f, MediaPurpose.ANNOUNCEMENT, id),
+        ),
       );
-      const results = await Promise.all(promises);
-      media.gallery.push(...results.map((r) => r.url));
+      ann.media.gallery.push(...results.map((r) => r.url));
     }
 
-    return await this.model.findByIdAndUpdate(
-      id,
-      { $set: { media } },
-      { new: true },
-    );
-  }
-
-  async linkMedia(id: string, url: string) {
-    const ann = await this.model.findById(id);
-    if (!ann) throw new NotFoundException();
-
-    try {
-      const res = await this.mediaService.uploadRemote(
-        url,
-        MediaPurpose.ANNOUNCEMENT,
-        `ann-${id}`,
-        id,
-      );
-      return await this.model.findByIdAndUpdate(
-        id,
-        { $set: { 'media.thumbnail': res.url } },
-        { new: true },
-      );
-    } catch {
-      throw new BadRequestException('Remote link failed');
-    }
-  }
-
-  async findOne(id: string) {
-    const item = await this.model.findById(id).exec();
-    if (!item) throw new NotFoundException();
-    return item;
-  }
-
-  async update(id: string, dto: UpdateAnnouncementDto) {
-    return await this.model.findByIdAndUpdate(id, dto, { new: true }).exec();
+    return await ann.save();
   }
 
   async remove(id: string) {
+    const ann = await this.model.findById(id);
+    if (!ann) throw new NotFoundException();
+
+    if (ann.media.thumbnail) await this.cleanupMediaByUrl(ann.media.thumbnail);
+    await Promise.all(
+      ann.media.gallery.map((url) => this.cleanupMediaByUrl(url)),
+    );
+
     return await this.model.findByIdAndDelete(id).exec();
   }
 
+  private async cleanupMediaByUrl(url: string): Promise<void> {
+    try {
+      const mediaRecord = await this.mediaModel.findOne({ url }).exec();
+      if (mediaRecord) {
+        await this.mediaService.delete(mediaRecord._id.toString());
+      }
+    } catch {
+      this.logger.error(`Cleanup failed for: ${url}`);
+    }
+  }
+
   private transform(item: Announcement, lang: string) {
-    const t = item.title;
-    const st = item.subtitle || {};
-    const sd = item.shortDescription || {};
-    const ld = item.longDescription || {};
+    const getL = (f: Record<string, string> | undefined) =>
+      f ? f[lang] || f['en'] || '' : '';
 
     return {
-      id: item._id,
+      id: item._id.toString(),
       category: item.category,
-      title: t[lang] || t['en'] || '',
-      subtitle: st[lang] || st['en'] || '',
-      shortDescription: sd[lang] || sd['en'] || '',
-      longDescription: ld[lang] || ld['en'] || '',
+      title: getL(item.title),
+      subtitle: getL(item.subtitle),
+      shortDescription: getL(item.shortDescription),
+      longDescription: getL(item.longDescription),
       media: item.media,
-      externalUrls: item.externalUrls,
-      pdfs: item.pdfs,
-      priority: item.priority,
+      attachments: item.attachments || { pdfs: [], externalUrls: [] },
       createdAt: item.createdAt,
     };
   }
