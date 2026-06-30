@@ -223,5 +223,18 @@ export class OffersService {
     }
 
     return results[0];
+  } // Inside OffersService
+  async findByProduct(productId: string): Promise<Offer[]> {
+    const now = new Date();
+
+    return this.offerModel
+      .find({
+        productIds: productId, // Mongoose searches inside the array automatically
+        hide: false, // Only show visible offers
+        validFrom: { $lte: now }, // Offer has started
+        validUntil: { $gte: now }, // Offer hasn't expired
+      })
+      .sort({ position: 1 })
+      .exec();
   }
 }

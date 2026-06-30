@@ -94,4 +94,8 @@ export class OffersController {
   async getOne(@Param('id') id: string): Promise<OfferWithInheritedMedia> {
     return await this.offersService.getByShortId(id);
   }
+  @Get('product/:productId')
+  async getByProduct(@Param('productId') productId: string): Promise<Offer[]> {
+    return await this.offersService.findByProduct(productId);
+  }
 }

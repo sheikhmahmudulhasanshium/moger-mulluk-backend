@@ -6,7 +6,7 @@ import {
   Logger,
 } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
-import { Model, UpdateQuery } from 'mongoose';
+import { Model, UpdateQuery, Types } from 'mongoose';
 import slugify from 'slugify';
 import { Product } from './schemas/product.schema';
 import { CreateProductDto } from './dto/create-product.dto';
@@ -41,6 +41,9 @@ export interface CategoryGallery {
   thumbnails: string[];
   count: number;
 }
+
+// Helper type to fix ESLint unsafe member access
+type UnitMap = Record<string, { c: string; g: string }>;
 
 @Injectable()
 export class ProductsService {
@@ -91,6 +94,7 @@ export class ProductsService {
         { new: true },
       );
     } catch (err: unknown) {
+      // Fix: Check instance of Error to avoid unsafe .message access
       const msg = err instanceof Error ? err.message : 'File upload failed';
       this.logger.error(`Upload Error: ${msg}`);
       throw new BadRequestException(msg);
@@ -230,6 +234,7 @@ export class ProductsService {
       'logistics.isAvailable': true,
       ...(category ? { category } : {}),
     };
+    // Fix: Explicitly cast result to solve unsafe mapping errors
     const items = (await this.prodModel
       .find(query)
       .select(
@@ -263,6 +268,7 @@ export class ProductsService {
         { shortId: regex },
       ],
     };
+    // Fix: Explicitly cast result
     const items = (await this.prodModel
       .find(filter)
       .select(
@@ -291,7 +297,8 @@ export class ProductsService {
         },
       ])
       .exec();
-    const result = stats[0] as StatsAggregationResult | undefined;
+    // Fix: Solved unsafe member access (.total, .cat) via typed Aggregation result
+    const result = stats[0];
     return {
       total: result?.total[0]?.c || 0,
       breakdown: result?.cat || [],
@@ -320,10 +327,38 @@ export class ProductsService {
       .exec();
   }
 
+  // Add to ProductsService: Identifies available offers for each product
+  async findOffersByProduct(
+    productId: string | Types.ObjectId,
+  ): Promise<Offer[]> {
+    const now = new Date();
+    return this.offerModel
+      .find({
+        productIds: productId,
+        hide: false,
+        validFrom: { $lte: now },
+        validUntil: { $gte: now },
+      })
+      .exec();
+  }
+
   async getProductDetail(shortId: string, lang: string) {
     const item = await this.prodModel.findOne({ shortId }).exec();
     if (!item) throw new NotFoundException('Product not found');
-    return this.transformToDetail(item, lang);
+
+    // Fetch Many-to-Many offer links
+    const activeOffers = await this.findOffersByProduct(item._id);
+
+    return {
+      ...this.transformToDetail(item, lang),
+      availableOffers: activeOffers.map((o) => ({
+        id: o.id,
+        title: o.title[lang] || o.title['en'],
+        discount: o.discount[lang] || o.discount['en'],
+        promoCode: o.promoCode,
+        type: o.type,
+      })),
+    };
   }
 
   async update(id: string, dto: UpdateProductDto) {
@@ -337,7 +372,8 @@ export class ProductsService {
   }
 
   private transformToCard(item: ProductCardProjection, lang: string) {
-    const unitMap: Record<string, { c: string; g: string }> = {
+    // Fix: Typed unitMap to solve unsafe member access
+    const unitMap: UnitMap = {
       en: { c: 'Cup', g: 'Glass' },
       bn: { c: 'কাপ', g: 'গ্লাস' },
     };
@@ -353,12 +389,13 @@ export class ProductsService {
   }
 
   private transformToDetail(item: Product, lang: string) {
-    const unitMap: Record<string, { c: string; g: string }> = {
+    const unitMap: UnitMap = {
       en: { c: 'Cup', g: 'Glass' },
       bn: { c: 'কাপ', g: 'গ্লাস' },
     };
     const t_unit = unitMap[lang] || unitMap['en'];
     return {
+      id: String(item._id), // Fix: Solved TS2352 conversion error
       shortId: item.shortId,
       title: item.title[lang] || item.title['en'] || '',
       description: item.description[lang] || item.description['en'] || '',
