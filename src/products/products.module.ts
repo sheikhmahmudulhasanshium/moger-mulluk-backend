@@ -5,11 +5,15 @@ import { ProductsController } from './products.controller';
 import { Product, ProductSchema } from './schemas/product.schema';
 import { CloudinaryModule } from '@/common/cloudinary/cloudinary.module';
 import { MediaModule } from '../media/media.module';
+import { Offer, OfferSchema } from '@/offers/schemas/offer.schema';
 
 @Module({
   imports: [
     MongooseModule.forFeature(
-      [{ name: Product.name, schema: ProductSchema }],
+      [
+        { name: Product.name, schema: ProductSchema },
+        { name: Offer.name, schema: OfferSchema }, // Added this
+      ],
       'products',
     ),
     CloudinaryModule,

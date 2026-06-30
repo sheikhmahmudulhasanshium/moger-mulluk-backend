@@ -15,6 +15,7 @@ import { SearchQueryDto } from './dto/search-query.dto';
 import { MediaService } from '../media/media.service';
 import { MediaPurpose } from '../common/enums/media-purpose.enum';
 import { UpdateMediaOrderDto } from './dto/update-media-order.dto';
+import { Offer } from '../offers/schemas/offer.schema'; // Added Import
 
 interface MediaResponse {
   url: string;
@@ -47,6 +48,7 @@ export class ProductsService {
 
   constructor(
     @InjectModel(Product.name, 'products') private prodModel: Model<Product>,
+    @InjectModel(Offer.name, 'products') private offerModel: Model<Offer>, // Added Injection
     private mediaService: MediaService,
   ) {}
 
@@ -364,5 +366,17 @@ export class ProductsService {
       unit: item.logistics.uKey === 'c' ? t_unit.c : t_unit.g,
       media: item.media,
     };
+  }
+
+  // New logic: Find products by Offer ID
+  async findProductsByOffer(offerId: string): Promise<Product[]> {
+    const offer = await this.offerModel.findById(offerId).exec();
+    if (!offer) throw new NotFoundException('Offer not found');
+
+    return this.prodModel
+      .find({
+        _id: { $in: offer.productIds },
+      })
+      .exec();
   }
 }

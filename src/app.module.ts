@@ -13,6 +13,7 @@ import { CloudinaryModule } from './common/cloudinary/cloudinary.module';
 import { Media, MediaSchema } from './media/media.schema';
 import { MediaModule } from './media/media.module';
 import { AnnouncementsModule } from './announcements/announcements.module';
+import { OffersModule } from './offers/offers.module';
 
 @Module({
   imports: [
@@ -24,7 +25,10 @@ import { AnnouncementsModule } from './announcements/announcements.module';
       useFactory: (config: ConfigService) => ({
         uri: config.get<string>('MONGODB_URI'),
         dbName: 'moger_mulluk_v2', // Use one primary database
+        family: 4, // Important for local DNS resolution
+
         serverSelectionTimeoutMS: 5000,
+        maxPoolSize: 10,
       }),
       inject: [ConfigService],
     }),
@@ -47,6 +51,7 @@ import { AnnouncementsModule } from './announcements/announcements.module';
       useFactory: (config: ConfigService) => ({
         uri: config.get<string>('MONGODB_URI'),
         dbName: 'metadata',
+        family: 4, // Important for local DNS resolution
       }),
       inject: [ConfigService],
     }),
@@ -63,6 +68,7 @@ import { AnnouncementsModule } from './announcements/announcements.module';
     PagesModule,
     MediaModule,
     AnnouncementsModule,
+    OffersModule, //added
   ],
   controllers: [AppController],
   providers: [AppService, { provide: APP_GUARD, useClass: ThrottlerGuard }],

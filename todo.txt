@@ -129,3 +129,66 @@ Shop	review	shortId	Displaying star ratings
 Shop	order	shortId	Tracking what was sold
 
 This plan keeps your catalog clean and your business operations secure. You are ready to build the next phase whenever you wish.
+
+0000000000000000000000000000000000000000000000000
+This summary outlines the development of the Offers module within your NestJS
+e-commerce backend (Moger Mulluk v2).
+
+1. NestJS CLI Correction
+
+  - Issue: nest resource offers failed.
+  - Fix: resource is a schematic, not a command. The correct syntax is: nest
+    generate resource offers --no-spec (or shorthand: nest g res offers).
+
+2. Architecture & Database Strategy
+
+  - Dual Connections: The project uses multiple MongoDB connections.
+      - products connection: Manages the menu collection.
+      - metadata connection: Manages site-wide data like offers, announcements,
+        and media.
+  - Localization: Following the existing pattern, all user-facing strings
+    (title, description, discount, conditions) are stored as Record<string,
+    string> to support multiple languages (en, bn, hi, es).
+
+3. The Offers Module Implementation
+
+  - Schema (Offer):
+      - Stored in the metadata database.
+      - Uses Date objects for validFrom and validUntil to allow server-side time
+        filtering.
+      - Includes a style object for frontend UI gradients and colors.
+  - DTOs (CreateOfferDto):
+      - Uses class-validator with @IsDateString() for strict ISO date
+        validation.
+  - Linting & Typing:
+      - Fixed no-unsafe-return and no-unsafe-call errors by providing explicit
+        return types (e.g., Promise<Offer[]>) in both the Service and Controller
+        to satisfy strict ESLint rules.
+
+4. Relationship Logic: Many-to-Many
+
+  - Offer → Product: One offer can contain multiple productIds (e.g.,
+    Bundles/Combos).
+  - Product → Offer: One product can belong to multiple offers (e.g., a "Plain
+    Tea" could have a "Morning Discount" and a "Student Discount"
+    simultaneously).
+  - Query Logic:
+      - To find offers for a product: this.offerModel.find({ productIds:
+        productId }). MongoDB automatically searches within the array.
+
+5. Future Logic (TBD)
+
+  - Numerical Discounts: Currently, discounts are strings for display. A future
+    "Checkout Logic" update will require numerical fields (discountValue) for
+    actual price calculations.
+  - Stacking Rules: You will need to decide if multiple discounts can be applied
+    at once or if the system should pick the "Best Price" automatically.
+  - Priority: The position field in the Offer schema will be used to determine
+    which offer to highlight if a product has several.
+
+6. Key Utility Functions Created
+
+  - findAll(activeOnly: boolean): Filters offers based on hide: false and
+    whether the current server time falls between validFrom and validUntil.
+  - findByProduct(productId: string): Retrieves all valid promotions currently
+    associated with a specific item.
