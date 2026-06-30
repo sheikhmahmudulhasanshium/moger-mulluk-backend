@@ -88,4 +88,10 @@ export class OffersController {
   async getCount() {
     return await this.offersService.getOfferStats();
   }
+  // ... other routes (Get recent, Get raw, etc)
+
+  @Get(':id')
+  async getOne(@Param('id') id: string): Promise<OfferWithInheritedMedia> {
+    return await this.offersService.getByShortId(id);
+  }
 }

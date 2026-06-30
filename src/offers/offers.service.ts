@@ -191,4 +191,37 @@ export class OffersService {
     await this.offerModel.deleteMany({}).exec();
     return await seeder.seedOffers(rawData);
   }
+  async getByShortId(id: string): Promise<OfferWithInheritedMedia> {
+    const results = await this.offerModel
+      .aggregate<OfferWithInheritedMedia>([
+        {
+          $match: { id }, // Matches the business short ID string
+        },
+        {
+          $lookup: {
+            from: 'menu', // Assuming your products collection is named 'menu'
+            localField: 'productIds',
+            foreignField: '_id',
+            as: 'product_details',
+          },
+        },
+        {
+          $addFields: {
+            displayImage: {
+              $ifNull: [
+                '$media.image',
+                { $arrayElemAt: ['$product_details.media.thumbnail', 0] },
+              ],
+            },
+          },
+        },
+      ])
+      .exec();
+
+    if (!results || results.length === 0) {
+      throw new NotFoundException(`Offer with ID ${id} not found`);
+    }
+
+    return results[0];
+  }
 }
